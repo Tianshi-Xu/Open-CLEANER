@@ -6,6 +6,7 @@ wandb/
 verl.egg-info/
 *.whl
 /dataset/
+!/dataset/Open-AgentRL-30K/Open-AgentRL-30K.filtered.parquet.success.jsonl
 __pycache__
 /output/
 .venv/
