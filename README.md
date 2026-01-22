@@ -151,6 +151,18 @@ bash recipe/cleaner/eval/eval_qwen3_4b_livecodebench.sh
 
 This generates trajectories under `VAL_SAVE_PATH`. Follow the **Custom Evaluation** section in the [LiveCodeBench](https://github.com/LiveCodeBench/LiveCodeBench) repository. You will need to align the generated trajectories with their `question_id` and convert them to the LiveCodeBench format. The `question_id` is in `dataset/Open-AgentRL-Eval/livecodebench-v6/lcb_v6_2502_2505.parquet`.
 
+## SAAR Rollback Implementation at a Glance
+
+The core implementation lives in [verl/verl/experimental/agent_loop/tool_agent_loop.py](verl/verl/experimental/agent_loop/tool_agent_loop.py) (all changes are marked with `#CLEANER`). Key flow:
+
+- Entry & config: `ToolAgentLoop.__init__()` wires rollback parameters; `RollbackManager` controls enablement, max retries, and error-pattern matching.
+- Trigger & detection: `_handle_processing_tools_state()` executes tool calls, using `_detect_errors()` / `_detect_error_from_text()` to classify failures from tool responses.
+- Rollback core: `_handle_rollback()` appends error feedback, regenerates tool calls, and uses `_overwrite_last_assistant_turn()` to either replace only the tool-call segment or the full assistant turn.
+- Token-level replacement: `_split_tool_call_segment()` and `_find_tool_call_token_boundary()` locate tool-call boundaries at the token level to preserve reasoning prefixes when possible.
+- Stats & samples: `AgentData` tracks retries, tool-call stats, and optional negative samples; `_call_tool()` records first-attempt success/failure reasons.
+
+Start from `ToolAgentLoop._handle_rollback()` and follow `_handle_processing_tools_state()` → `_overwrite_last_assistant_turn()` → `_split_tool_call_segment()` to understand the full rollback path.
+
 ## 📝 Citation
 
 If you use Open-CLEANER, please cite our paper:

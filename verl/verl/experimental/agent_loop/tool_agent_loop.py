@@ -466,10 +466,10 @@ class ToolAgentLoop(AgentLoopBase):
                     retry_count = agent_data.retry_counts.get(tool_position_key, 0)
                     is_update = tool_position_key in agent_data.pending_negative_samples
                     agent_data.pending_negative_samples[tool_position_key] = negative_sample
-                    logger.info(
-                        f"🔴 [NEGATIVE_SAMPLE] {'Updated' if is_update else 'Created'} negative sample at {tool_position_key} "
-                        f"(retry #{retry_count}, errors: {error_types})"
-                    )
+                    # logger.info(
+                    #     f"🔴 [NEGATIVE_SAMPLE] {'Updated' if is_update else 'Created'} negative sample at {tool_position_key} "
+                    #     f"(retry #{retry_count}, errors: {error_types})"
+                    # )
                 
                 # Record rollback trigger on first failure
                 if agent_data.retry_counts.get(tool_position_key, 0) == 0:
@@ -480,11 +480,11 @@ class ToolAgentLoop(AgentLoopBase):
                 if exceeded_retries or agent_data.disable_rollback_after_max_retry:
                     # Drop pending negative sample on final failure
                     dropped_sample = agent_data.pending_negative_samples.pop(tool_position_key, None)
-                    if dropped_sample:
-                        logger.info(
-                            f"❌ [NEGATIVE_SAMPLE] Dropped negative sample at {tool_position_key} "
-                            f"(max retries exceeded or rollback disabled)"
-                        )
+                    # if dropped_sample:
+                        # logger.info(
+                        #     f"❌ [NEGATIVE_SAMPLE] Dropped negative sample at {tool_position_key} "
+                        #     f"(max retries exceeded or rollback disabled)"
+                        # )
                     if tool_position_key not in agent_data.rollback_recovered_turns:
                         agent_data.global_rollback_failed += 1
                     return await self._handle_max_retry_exceeded(
@@ -520,7 +520,7 @@ class ToolAgentLoop(AgentLoopBase):
                     
                     agent_data.rollback_recovered_turns.add(tool_position_key)
                     agent_data.global_rollback_recovered += 1
-                    logger.info(f"♻️ [ROLLBACK] Successfully recovered at {tool_position_key} (total recovered: {agent_data.global_rollback_recovered})")
+                    # logger.info(f"♻️ [ROLLBACK] Successfully recovered at {tool_position_key} (total recovered: {agent_data.global_rollback_recovered})")
         
         # Process tool responses normally
         add_messages: list[dict[str, Any]] = []

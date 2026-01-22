@@ -1,15 +1,15 @@
 #!/bin/bash
-export WANDB_API_KEY="YOUR_WANDB_KEY"
+export WANDB_API_KEY="c2ade05262c251418946ecc479a941028eb37bba"
 set -x
 # Set your wandb API key here or export it in your environment
 
 # AMLT_DATA_DIR will be automatically prepended to MODEL_PATH if set
 # export AMLT_DATA_DIR="/path/to/your/data"
 
-train_dataset=/path/to/your/filtered_dataset.parquet
-aime_2024=/path/to/your/aime_2024_problems.parquet
-aime_2025=/path/to/your/aime_2025_problems.parquet
-model_path=/path/to/your/model
+train_dataset=dataset/Open-AgentRL-30K/Open-AgentRL-30K.parquet
+aime_2024=dataset/Open-AgentRL-Eval/aime2024/aime_2024_problems.parquet
+aime_2025=dataset/Open-AgentRL-Eval/aime2025/aime_2025_problems.parquet
+model_path=/path/to/your/Qwen3-4B-model
 
 train_files="['$train_dataset']"
 test_files="['$aime_2025', '$aime_2024']"
@@ -141,7 +141,7 @@ fi
     trainer.project_name=$project_name \
     trainer.experiment_name=$experiment_name \
     trainer.n_gpus_per_node=$num_GPU \
-    trainer.val_before_train=False \
+    trainer.val_before_train=True \
     trainer.log_val_generations=20 \
     trainer.validation_data_dir=$VAL_SAVE_PATH \
     trainer.nnodes=1 \
