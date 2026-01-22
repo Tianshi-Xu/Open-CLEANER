@@ -1,0 +1,6 @@
+redis
+fastapi[standard]
+uvicorn
+psutil
+json-repair
+math_verify

@@ -1,0 +1,21 @@
+tools:
+  - class_name: "recipe.cleaner.code_judge_tool.PythonTool"
+    config: 
+      type: native
+      request_processor_concurrency: 8
+      request_processor_batch_size: 32
+      request_processor_batch_timeout_seconds: 30
+      host_addr: "localhost"
+      host_port: "8088"
+    tool_schema:
+      type: "function"
+      function:
+        name: "code_interpreter"
+        description: "A tool for executing code."
+        parameters:
+          type: "object"
+          properties:
+            code:
+              type: "string"
+              description: "The code to execute."
+          required: ["code"]
