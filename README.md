@@ -124,7 +124,7 @@ After downloading the datasets and SFT checkpoints, follow the steps below to st
 
 - CLEANER-specific parameters that control the SAAR mechanism:
   - `+actor_rollout_ref.rollout.multi_turn.enable_tool_rollback`: set `True` to enable SAAR. Requires `+actor_rollout_ref.rollout.multi_turn.max_tool_retries` (we recommend `3`).
-  - SAAR similarity threshold $\gamma$: in `verl/verl/experimental/agent_loop/tool_agent_loop.py`, change `should_replace_reasoning = (similarity < 0.5)` by replacing `0.5` with your desired threshold. We did not expose this as a config because $0.5\text{–}1.0$ works well in practice and has limited impact on final results.
+  - SAAR similarity threshold $\gamma$: in `verl/verl/experimental/agent_loop/tool_agent_loop.py`, replace `0.5` in `should_replace_reasoning = (similarity < 0.5)` with your desired threshold. We did not expose this as a config because in practice $0.5\text{–}1.0$ works well and has limited impact on final results; even 1.0 performs well.
   - `+actor_rollout_ref.rollout.multi_turn.rollback_probability`: rollback probability. We recommend `0.7` for Qwen2.5-7B and `1.0` for Qwen3-4B.
   - `actor_rollout_ref.actor.fsdp_config.dtype` and `actor_rollout_ref.rollout.dtype`: we recommend setting both to `float16` to reduce train/infer mismatch.
   - `+algorithm.rollout_correction.rollout_is`: enables IS correction for train/infer mismatch. CLEANER should disable this; otherwise it introduces logits recomputation for overwritten segments. Baselines can enable it, though we found limited gains.
