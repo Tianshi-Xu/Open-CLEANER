@@ -1,5 +1,5 @@
 #!/bin/bash
-export WANDB_API_KEY="c2ade05262c251418946ecc479a941028eb37bba"
+export WANDB_API_KEY="YOUR_WANDB_API"
 set -x
 # Set your wandb API key here or export it in your environment
 
