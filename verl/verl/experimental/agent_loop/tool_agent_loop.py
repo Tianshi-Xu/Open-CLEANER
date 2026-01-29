@@ -82,7 +82,7 @@ class RollbackManager:
         # if error_types[-1] == "worker_timeout":
         #     feedback += "The current algorithm complexity may be too high."
         # feedback += "\nPlease correct the error and generate a new tool call."
-        feedback = error_messages[-1] # only return nomarl error message is fine
+        feedback = error_messages[-1]  # only return normal error message is fine
         return feedback
     
     def create_checkpoint(self, agent_data: "AgentData") -> dict[str, Any]:
@@ -693,7 +693,8 @@ class ToolAgentLoop(AgentLoopBase):
         except Exception as e:
             #CLEANER: add detailed response for format error
             logger.warning(f"tool call error: {e}")
-            if "'str' object has no attribute 'get'" in str(e):
+            # Check if it's a format-related error (AttributeError, TypeError, KeyError, json parsing)
+            if isinstance(e, (AttributeError, TypeError, KeyError)) or "'str' object has no attribute" in str(e).lower():
                 error_response = (
                     "Tool call failure: tool call format is wrong, please make sure to generate correct "
                     "json-format tool call arguments."
@@ -814,7 +815,7 @@ class ToolAgentLoop(AgentLoopBase):
         
         return error_messages, error_types
     
-    #CLEANER: below funtions are all for rollback handling
+    #CLEANER: below functions are all for rollback handling
     async def _handle_rollback(
         self, agent_data: AgentData, checkpoint: dict[str, Any], tool_position_key: str,
         error_messages: list[str], error_types: list[str], sampling_params: dict[str, Any]
