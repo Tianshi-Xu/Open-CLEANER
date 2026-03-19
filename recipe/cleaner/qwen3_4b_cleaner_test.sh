@@ -1,20 +1,28 @@
-# export WANDB_API_KEY="YOUR_WANDB_KEY"
+#!/bin/bash
+# export WANDB_API_KEY="YOUR_WANDB_API"
+export WANDB_MODE=offline
 set -x
+# Set your wandb API key here or export it in your environment
 
-# ================= data/model/tool =================
+# AMLT_DATA_DIR will be automatically prepended to MODEL_PATH if set
+# export AMLT_DATA_DIR="/path/to/your/data"
+
 train_dataset=dataset/Open-AgentRL-30K/Open-AgentRL-30K.parquet
-model_path=models/CLEANER-4B
-livecodebench=dataset/Open-AgentRL-Eval/livecodebench-v6/lcb_v6_2502_2505.parquet
+aime_2024=dataset/Open-AgentRL-Eval/aime2024/aime_2024_problems.parquet
+aime_2025=dataset/Open-AgentRL-Eval/aime2025/aime_2025_problems.parquet
+model_path=models/Qwen3-4B-RA-SFT
+
 train_files="['$train_dataset']"
-test_files="['$livecodebench']"
+test_files="['$aime_2025', '$aime_2024']"
 
 # tool
 tool_config_path=recipe/cleaner/rstar_code_judge.yaml
 
 # wandb
 project_name=Open-CLEANER
-experiment_name=qwen3-4b-lcb
+experiment_name=Qwen3-4B-CLEANER
 default_local_dir=output/$experiment_name
+resume_dir=Qwen3-4B/global_step_240 # resume from checkpoint if needed
 
 # ================= DAPO algorithm =================
 adv_estimator=grpo
@@ -32,31 +40,38 @@ clip_ratio_high=0.28
 # loss agg
 loss_agg_mode="token-mean"
 
-
 #Overlong Reward Shaping
 reward_manager=dapo
 enable_overlong_buffer=True
 overlong_buffer_len=$((1024 * 4))
 overlong_penalty_factor=1.0
 
+# IS for rollout and training
+rollout_is=sequence
+rollout_is_threshold=2
+rollout_rs=geometric
+rollout_rs_threshold=1.001
+rollout_rs_threshold_lower=0.99
 
 max_turns=16
-max_prompt_length=4096
+max_prompt_length=2560
 max_response_length=20480
-actor_lr=1e-6
+actor_lr=2e-6
 
-train_batch_size=128
-ppo_mini_batch_size=32
-n_resp_per_prompt=1
-n_resp_per_prompt_val=4
+train_batch_size=8
+ppo_mini_batch_size=4
+n_resp_per_prompt=8
+n_resp_per_prompt_val=16
 
 # ================= perfomance =================
+infer_dp=1
 infer_tp=1 # sglang
 train_sp=1 # train
 offload=True
-num_GPU=2
+num_GPU=1
 
 actor_max_token_len_per_gpu=$(( (max_prompt_length + max_response_length) * 1 ))
+
 log_prob_max_token_len_per_gpu=$(( actor_max_token_len_per_gpu * 4 ))
 
 # ================= save rollouts =================
@@ -67,13 +82,13 @@ VAL_SAVE_PATH="${default_local_dir}/validation"
 if [ ! -d "$ROLLOUT_SAVE_PATH" ]; then
     mkdir -p $ROLLOUT_SAVE_PATH
 fi
+
 # Create validation save directory
 if [ ! -d "$VAL_SAVE_PATH" ]; then
     mkdir -p $VAL_SAVE_PATH
 fi
 
-
-python3 -m recipe.cleaner.custom_main_ppo \
+    python3 -m recipe.cleaner.custom_main_ppo \
     algorithm.adv_estimator=$adv_estimator \
     algorithm.use_kl_in_reward=$use_kl_in_reward \
     algorithm.kl_ctrl.kl_coef=$kl_coef \
@@ -89,7 +104,6 @@ python3 -m recipe.cleaner.custom_main_ppo \
     data.custom_cls.path=recipe/cleaner/reward.py \
     data.custom_cls.name=CustomRLHFDataset \
     custom_reward_function.path=recipe/cleaner/reward.py \
-    custom_reward_function.name=compute_score_outcome_reward \
     actor_rollout_ref.model.path=$model_path \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
@@ -105,10 +119,6 @@ python3 -m recipe.cleaner.custom_main_ppo \
     actor_rollout_ref.actor.ppo_mini_batch_size=$ppo_mini_batch_size \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=$actor_max_token_len_per_gpu \
     actor_rollout_ref.actor.ulysses_sequence_parallel_size=$train_sp \
-    actor_rollout_ref.actor.fsdp_config.offload_policy=False \
-    actor_rollout_ref.actor.fsdp_config.param_offload=$offload \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=$offload \
-    actor_rollout_ref.actor.strategy=fsdp2 \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=$log_prob_max_token_len_per_gpu \
     actor_rollout_ref.rollout.name=sglang \
     actor_rollout_ref.rollout.mode=async \
@@ -118,7 +128,6 @@ python3 -m recipe.cleaner.custom_main_ppo \
     actor_rollout_ref.rollout.multi_turn.max_assistant_turns=$max_turns \
     actor_rollout_ref.rollout.multi_turn.tool_config_path=$tool_config_path \
     actor_rollout_ref.rollout.multi_turn.format=hermes \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.75 \
     actor_rollout_ref.rollout.n=$n_resp_per_prompt \
     actor_rollout_ref.rollout.val_kwargs.top_p=0.6 \
     actor_rollout_ref.rollout.val_kwargs.temperature=1.0 \
@@ -133,16 +142,41 @@ python3 -m recipe.cleaner.custom_main_ppo \
     trainer.project_name=$project_name \
     trainer.experiment_name=$experiment_name \
     trainer.n_gpus_per_node=$num_GPU \
-    trainer.val_before_train=True \
-    trainer.validation_data_dir=${VAL_SAVE_PATH} \
+    trainer.val_before_train=False \
     trainer.log_val_generations=20 \
+    trainer.validation_data_dir=$VAL_SAVE_PATH \
     trainer.nnodes=1 \
-    trainer.save_freq=-1 \
+    trainer.save_freq=10 \
     trainer.default_local_dir=$default_local_dir \
-    trainer.total_training_steps=1 \
     trainer.test_freq=10 \
-    trainer.total_epochs=1 $@ \
+    actor_rollout_ref.actor.strategy=fsdp2 \
+    actor_rollout_ref.model.use_fused_kernels=True \
+    actor_rollout_ref.model.fused_kernel_options.impl_backend=triton \
+    actor_rollout_ref.rollout.data_parallel_size=$infer_dp \
+    actor_rollout_ref.actor.fsdp_config.offload_policy=False \
+    actor_rollout_ref.actor.fsdp_config.param_offload=$offload \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=$offload \
+    actor_rollout_ref.rollout.over_sample_rate=0.0 \
+    actor_rollout_ref.rollout.calculate_log_probs=False \
+    actor_rollout_ref.actor.optim.lr_warmup_steps=20 \
+    trainer.total_epochs=1 \
+    actor_rollout_ref.actor.fsdp_config.dtype=float16 \
+    actor_rollout_ref.rollout.dtype=float16 \
+    +actor_rollout_ref.rollout.multi_turn.save_negative_samples=False \
+    +actor_rollout_ref.rollout.multi_turn.max_negative_samples_per_group=0 \
     +actor_rollout_ref.rollout.multi_turn.enable_tool_rollback=True \
     +actor_rollout_ref.rollout.multi_turn.max_tool_retries=3 \
-    actor_rollout_ref.rollout.dtype=float16 \
-    actor_rollout_ref.actor.fsdp_config.dtype=float16 \
+    custom_reward_function.name=compute_score_outcome_reward \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.80 \
+    actor_rollout_ref.rollout.agent.num_workers=1
+    # trainer.resume_mode=resume_path \
+    # trainer.resume_from_path=$resume_dir \
+    # +algorithm.use_dpo_on_tool_calls=true \
+    # +algorithm.dpo_beta=15 \
+    # +algorithm.dpo_max_adjustment_ratio=0.1 \
+    # actor_rollout_ref.actor.policy_loss.loss_mode=cispo \
+    # +algorithm.rollout_correction.rollout_is=${rollout_is} \
+    # +algorithm.rollout_correction.rollout_rs=${rollout_rs} \
+    # +algorithm.rollout_correction.rollout_rs_threshold=${rollout_rs_threshold} \
+    # +algorithm.rollout_correction.rollout_rs_threshold_lower=${rollout_rs_threshold_lower} \
+    # +trainer.filter_zero_advantage_samples=False \

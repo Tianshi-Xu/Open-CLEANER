@@ -50,10 +50,10 @@ Other official VeRL installation options are supported; see the [VeRL documentat
 Inside the Docker container, clone this repository and install dependencies:
 
 ```bash
-sudo apt-get update -y
-sudo apt install tmux -y
-sudo apt-get install -y libglib2.0-0
-sudo apt-get install redis -y
+apt-get update -y
+apt install tmux -y
+apt-get install -y libglib2.0-0
+apt-get install redis -y
 cd Open-CLEANER
 pip install -r code-judge/requirements.txt
 pip install -e code-judge

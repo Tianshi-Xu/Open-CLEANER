@@ -2,6 +2,7 @@
 /output_local/
 /checkpoints/
 /checkpoint/
+/models/
 wandb/
 verl.egg-info/
 *.whl

@@ -6,7 +6,9 @@ import sys
 import time
 import psutil
 
-sys.set_int_max_str_digits(50000)
+# set_int_max_str_digits 自 Python 3.10.7 / 3.11 才有，旧版本跳过
+if hasattr(sys, "set_int_max_str_digits"):
+    sys.set_int_max_str_digits(50000)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import json

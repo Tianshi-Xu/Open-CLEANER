@@ -165,6 +165,14 @@ class AgentData:
         self.total_rollbacks = 0
         self.disable_rollback_after_max_retry = False
         self.rollback_recovered_turns: set[str] = set()
+        # Deferred rollback: tool_call_idx = 第几次「独立」tool call（回滚重试、第一次错后的修正都不算新的独立 call）。
+        # tool_call_attempt_count[idx] = 该 idx 下第几次尝试；count > 1 时才启动回滚。
+        self.tool_call_idx: int = 0
+        self.tool_call_attempt_count: dict[int, int] = defaultdict(int)
+        self._next_tool_call_is_correction: bool = False  # 免回滚后下一轮是「修正」而非新独立 call，不递增 tool_call_idx
+        # 追踪首次错误状态（用于判断是首次调用还是修复尝试）
+        self.first_error_tool_idx: Optional[int] = None  # 首次出错的 tool_call_idx
+        self.waiting_for_correction: bool = False  # 是否在等待修正结果
         # Temporary state for tool calls
         self.tool_calls: list[FunctionCall] = []
         
@@ -430,9 +438,10 @@ class ToolAgentLoop(AgentLoopBase):
             )
             agent_data.disable_rollback_after_max_retry = True
         
-        # Determine retry position key first to check if this is first attempt
+        # New tool call vs rollback retry: only when we're not given an explicit key do we have a fresh tool call.
         if tool_position_key is None:
             tool_position_key = f"turn_{agent_data.assistant_turns}"
+            agent_data.tool_call_idx += 1
         
         # Check if this is the first attempt at this position (not a retry)
         is_first_attempt = (agent_data.retry_counts.get(tool_position_key, 0) == 0)
@@ -453,53 +462,86 @@ class ToolAgentLoop(AgentLoopBase):
         is_retrying = agent_data.retry_counts.get(tool_position_key, 0) > 0
         if self.rollback_manager.enable and (not agent_data.disable_rollback_after_max_retry or is_retrying):
             if error_messages:
-                # Save/update negative sample on every failure (if enabled)
-                # Always keep the latest failed state to match final positive sample
-                # Skip negative sampling during validation
-                # print("is_validation:", self.is_validation)
-                if (self.negative_sampling_enabled and
-                    not self.is_validation and
-                    self.rollback_manager.save_negative_samples and 
-                    agent_data.negative_samples_count < self.rollback_manager.max_negative_samples_per_group):
-                    negative_sample = self._create_negative_sample(agent_data)
-                    # Always update to keep the latest failed state
-                    retry_count = agent_data.retry_counts.get(tool_position_key, 0)
-                    is_update = tool_position_key in agent_data.pending_negative_samples
-                    agent_data.pending_negative_samples[tool_position_key] = negative_sample
-                    # logger.info(
-                    #     f"🔴 [NEGATIVE_SAMPLE] {'Updated' if is_update else 'Created'} negative sample at {tool_position_key} "
-                    #     f"(retry #{retry_count}, errors: {error_types})"
-                    # )
-                
-                # Record rollback trigger on first failure
-                if agent_data.retry_counts.get(tool_position_key, 0) == 0:
-                    agent_data.global_rollback_triggered += 1
-                
-                # Check retry limit
-                exceeded_retries = not self.rollback_manager.can_retry(agent_data.retry_counts, tool_position_key)
-                if exceeded_retries or agent_data.disable_rollback_after_max_retry:
-                    # Drop pending negative sample on final failure
-                    dropped_sample = agent_data.pending_negative_samples.pop(tool_position_key, None)
-                    # if dropped_sample:
-                        # logger.info(
-                        #     f"❌ [NEGATIVE_SAMPLE] Dropped negative sample at {tool_position_key} "
-                        #     f"(max retries exceeded or rollback disabled)"
-                        # )
-                    if tool_position_key not in agent_data.rollback_recovered_turns:
-                        agent_data.global_rollback_failed += 1
-                    return await self._handle_max_retry_exceeded(
-                        agent_data, responses, error_messages, error_types, tool_call_names, sampling_params
-                    )
-                
-                # Create checkpoint and handle rollback
-                checkpoint = self.rollback_manager.create_checkpoint(agent_data)
-                rollback_result = await self._handle_rollback(
-                    agent_data, checkpoint, tool_position_key, error_messages, error_types, sampling_params
+                retry_count = agent_data.retry_counts.get(tool_position_key, 0)
+                current_idx = agent_data.tool_call_idx
+
+                # 判断是否是修正尝试（首次错误后的下一轮 tool call）
+                # 修正尝试 = 在等待修正 + 有首次错误记录 + 是紧接着的下一轮
+                is_correction_attempt = (
+                    agent_data.waiting_for_correction and
+                    agent_data.first_error_tool_idx is not None and
+                    current_idx == agent_data.first_error_tool_idx + 1
                 )
-                if rollback_result is not None:
-                    return rollback_result
+
+                # DEBUG: 打印回滚判断状态
+                print(f"[ROLLBACK_DEBUG] request_id={agent_data.request_id[:8]} | "
+                           f"tool_position_key={tool_position_key} | current_idx={current_idx} | "
+                           f"retry_count={retry_count} | waiting_for_correction={agent_data.waiting_for_correction} | "
+                           f"first_error_tool_idx={agent_data.first_error_tool_idx} | is_correction_attempt={is_correction_attempt}")
+
+                if retry_count > 0:
+                    # 已有重试记录，触发回滚
+                    should_trigger_rollback = True
+                    print(f"[ROLLBACK_DEBUG] -> 触发回滚: 已有重试记录 (retry_count={retry_count})")
+                elif is_correction_attempt:
+                    # 修正后仍错误，触发回滚
+                    should_trigger_rollback = True
+                    agent_data.waiting_for_correction = False
+                    agent_data.first_error_tool_idx = None
+                    print(f"[ROLLBACK_DEBUG] -> 触发回滚: 修正后仍错误")
+                else:
+                    # 首次错误 → 不回滚，记录状态，等待修正
+                    should_trigger_rollback = False
+                    agent_data.first_error_tool_idx = current_idx
+                    agent_data.waiting_for_correction = True
+                    print(f"[ROLLBACK_DEBUG] -> 首次错误不回滚，等待修正 (first_error_tool_idx={current_idx})")
+
+                if not should_trigger_rollback:
+                    # Fall through to normal tool-response processing so the model sees the error.
+                    pass
+                else:
+                    # Trigger the real rollback mechanism (correction failed or retry).
+
+                    # Save/update negative sample on every rollback-triggering failure (if enabled)
+                    if (self.negative_sampling_enabled and
+                        not self.is_validation and
+                        self.rollback_manager.save_negative_samples and
+                        agent_data.negative_samples_count < self.rollback_manager.max_negative_samples_per_group):
+                        negative_sample = self._create_negative_sample(agent_data)
+                        agent_data.pending_negative_samples[tool_position_key] = negative_sample
+
+                    # Record rollback trigger on the first rollback attempt at this position
+                    if retry_count == 0:
+                        agent_data.global_rollback_triggered += 1
+
+                    # Check retry limit
+                    exceeded_retries = not self.rollback_manager.can_retry(agent_data.retry_counts, tool_position_key)
+                    if exceeded_retries or agent_data.disable_rollback_after_max_retry:
+                        # Drop pending negative sample on final failure
+                        agent_data.pending_negative_samples.pop(tool_position_key, None)
+                        if tool_position_key not in agent_data.rollback_recovered_turns:
+                            agent_data.global_rollback_failed += 1
+                        return await self._handle_max_retry_exceeded(
+                            agent_data, responses, error_messages, error_types, tool_call_names, sampling_params
+                        )
+
+                    # Create checkpoint and handle rollback
+                    checkpoint = self.rollback_manager.create_checkpoint(agent_data)
+                    rollback_result = await self._handle_rollback(
+                        agent_data, checkpoint, tool_position_key, error_messages, error_types, sampling_params
+                    )
+                    if rollback_result is not None:
+                        return rollback_result
             else:
-                # Success after retry - persist negative sample
+                # Success — clear pending correction wait
+                # DEBUG: 打印成功清除状态
+                if agent_data.waiting_for_correction:
+                    print(f"[ROLLBACK_DEBUG] request_id={agent_data.request_id[:8]} | "
+                               f"修正成功，清除等待状态 (first_error_tool_idx={agent_data.first_error_tool_idx})")
+                agent_data.waiting_for_correction = False
+                agent_data.first_error_tool_idx = None
+
+                # Success after rollback-retry - persist negative sample
                 retry_count = agent_data.retry_counts.get(tool_position_key, 0)
                 if retry_count > 0:
                     pending_sample = agent_data.pending_negative_samples.pop(tool_position_key, None)
@@ -510,17 +552,9 @@ class ToolAgentLoop(AgentLoopBase):
                             agent_data.saved_tool_call_token_range = self._calculate_tool_call_range(agent_data)
                         agent_data.negative_samples.append(pending_sample)
                         agent_data.negative_samples_count += 1
-                        # logger.info(
-                        #     f"✅ [NEGATIVE_SAMPLE] Persisted negative sample at {tool_position_key} "
-                        #     f"(after {retry_count} retries, total negative samples: {agent_data.negative_samples_count}/{self.rollback_manager.max_negative_samples_per_group})"
-                        # )
-                    elif pending_sample is None:
-                        # logger.warning(f"⚠️ [NEGATIVE_SAMPLE] No pending sample found at {tool_position_key} to persist")
-                        pass
-                    
+
                     agent_data.rollback_recovered_turns.add(tool_position_key)
                     agent_data.global_rollback_recovered += 1
-                    # logger.info(f"♻️ [ROLLBACK] Successfully recovered at {tool_position_key} (total recovered: {agent_data.global_rollback_recovered})")
         
         # Process tool responses normally
         add_messages: list[dict[str, Any]] = []
@@ -912,21 +946,21 @@ class ToolAgentLoop(AgentLoopBase):
             # is_first_turn = (checkpoint.get("assistant_turns", 0) == 1)
             # print("assistant_turns:",checkpoint.get("assistant_turns", 0))
             should_replace_reasoning = (similarity < 0.5)
-            # print(f"\n{'='*70}")
-            # print("✅ [ROLLBACK] Tool call replacement (token-level split)")
-            # print(f"{'-'*70}")
-            # print(f"Similarity: {similarity:.3f} | Strategy: {'Replace reasoning+tool call' if should_replace_reasoning else 'Replace tool call only'}")
-            # print(f"{'-'*70}")
-            # print(f"Old: {old_prefix_len} reasoning tokens + {old_call_len} tool call tokens")
-            # print(f"Old reasoning text:\n{old_prefix_text}")
-            # print(f"Old tool call text:\n{old_call_text}")
-            # print(f"Tool error message: {error_message}")
-            # print(f"Instruct message: {error_message}")
-            # print(f"{'-'*70}")
-            # print(f"New: {new_prefix_len} reasoning tokens + {new_call_len} tool call tokens")
-            # print(f"New reasoning text:\n{new_prefix_text}")
-            # print(f"New tool call text:\n{new_call_text}")
-            # print(f"{'='*70}\n")
+            print(f"\n{'='*70}")
+            print("✅ [ROLLBACK] Tool call replacement (token-level split)")
+            print(f"{'-'*70}")
+            print(f"Similarity: {similarity:.3f} | Strategy: {'Replace reasoning+tool call' if should_replace_reasoning else 'Replace tool call only'}")
+            print(f"{'-'*70}")
+            print(f"Old: {old_prefix_len} reasoning tokens + {old_call_len} tool call tokens")
+            print(f"Old reasoning text:\n{old_prefix_text}")
+            print(f"Old tool call text:\n{old_call_text}")
+            print(f"Tool error message: {error_message}")
+            print(f"Instruct message: {error_message}")
+            print(f"{'-'*70}")
+            print(f"New: {new_prefix_len} reasoning tokens + {new_call_len} tool call tokens")
+            print(f"New reasoning text:\n{new_prefix_text}")
+            print(f"New tool call text:\n{new_call_text}")
+            print(f"{'='*70}\n")
             
             if should_replace_reasoning:
                 # Similarity <= 0.5: Replace reasoning + tool call (full turn replacement)
