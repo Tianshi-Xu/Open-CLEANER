@@ -16,9 +16,12 @@ SandboxFusion/.venv/
 /pretrained_model/
 .vscode/
 .amltconfig
+.claude/
 .dockerignore
 output.txt
-pyproject.toml
 *.yml
 uv.lock
 upload_model.py
+*.run
+*.tar
+*.gz

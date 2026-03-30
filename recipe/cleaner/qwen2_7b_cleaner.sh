@@ -1,14 +1,14 @@
 #!/bin/bash
-export WANDB_API_KEY="YOUR_WANDB_KEY"
+# export WANDB_API_KEY="YOUR_WANDB_KEY"
 set -x
 
 # AMLT_DATA_DIR will be automatically prepended to MODEL_PATH if set
 # export AMLT_DATA_DIR="/path/to/your/data"
 
-train_dataset=/path/to/your/filtered_dataset.parquet
-aime_2024=/path/to/your/aime_2024_problems.parquet
-aime_2025=/path/to/your/aime_2025_problems.parquet
-model_path=/path/to/your/model
+train_dataset=dataset/Open-AgentRL-30K/Open-AgentRL-30K.parquet
+aime_2024=dataset/Open-AgentRL-Eval/aime2024/aime_2024_problems.parquet
+aime_2025=dataset/Open-AgentRL-Eval/aime2025/aime_2025_problems.parquet
+model_path=models/Qwen2.5-7B-RA-SFT
 
 train_files="['$train_dataset']"
 test_files="['$aime_2025', '$aime_2024']"
@@ -67,7 +67,7 @@ infer_dp=1
 infer_tp=1 # sglang
 train_sp=1 # train
 offload=True
-num_GPU=4
+num_GPU=8
 
 
 actor_max_token_len_per_gpu=$(( (max_prompt_length + max_response_length) * 1 ))
@@ -149,9 +149,9 @@ fi
     trainer.log_val_generations=20 \
     trainer.validation_data_dir=$VAL_SAVE_PATH \
     trainer.nnodes=1 \
-    trainer.save_freq=10 \
+    trainer.save_freq=50 \
     trainer.default_local_dir=$default_local_dir \
-    trainer.test_freq=10 \
+    trainer.test_freq=50 \
     actor_rollout_ref.actor.strategy=fsdp2 \
     actor_rollout_ref.model.use_fused_kernels=True \
     actor_rollout_ref.model.fused_kernel_options.impl_backend=triton \
@@ -171,7 +171,7 @@ fi
     trainer.total_epochs=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.80 \
     custom_reward_function.name=compute_score_outcome_reward \
-    +actor_rollout_ref.rollout.multi_turn.rollback_probability=0.7 \
+    # +actor_rollout_ref.rollout.multi_turn.rollback_probability=0.7 \
     # +algorithm.rollout_correction.rollout_is=${rollout_is} \
     # +algorithm.use_dpo_on_tool_calls=true \
     # +algorithm.dpo_beta=15 \

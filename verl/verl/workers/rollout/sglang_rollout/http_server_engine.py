@@ -687,7 +687,7 @@ class AsyncHttpServerAdapter(HttpServerAdapter):
             return {}
 
         url = f"http://{self.server_args.host}:{self.server_args.port}/{endpoint}"
-
+        # print("url:",url)
         for attempt in range(self.max_attempts):
             try:
                 async with self._get_session() as session:
@@ -716,6 +716,78 @@ class AsyncHttpServerAdapter(HttpServerAdapter):
                 await asyncio.sleep(self.retry_delay * (2**attempt))
 
         raise RuntimeError(f"Failed to complete async request to {endpoint} after {self.max_attempts} attempts")
+
+    # async def _make_async_request(
+    #     self,
+    #     endpoint: str,
+    #     payload: Optional[dict[str, Any]] = None,
+    #     method: str = "POST",
+    #     timeout: float = DEFAULT_TIMEOUT,
+    #     only_master: bool = True,
+    # ) -> dict[str, Any]:
+    #     import time
+    #     import traceback
+
+    #     if only_master and self.node_rank != 0:
+    #         return {}
+
+    #     url = f"http://{self.server_args.host}:{self.server_args.port}/{endpoint}"
+        
+    #     print(f"\n{'='*50}")
+    #     print(f"[DEBUG-VERL] 🚀 准备发送 {method} 请求")
+    #     print(f"[DEBUG-VERL] 目标 URL: {url}")
+    #     print(f"[DEBUG-VERL] Payload: {payload}")
+    #     print(f"[DEBUG-VERL] 设定的 Timeout: {timeout} 秒")
+    #     print(f"{'='*50}\n")
+
+    #     for attempt in range(self.max_attempts):
+    #         start_time = time.time()
+    #         try:
+    #             print(f"[DEBUG-VERL] 👉 开始第 {attempt + 1}/{self.max_attempts} 次尝试...")
+    #             async with self._get_session() as session:
+    #                 if method.upper() == "GET":
+    #                     async with session.get(url, timeout=timeout) as response:
+    #                         print(f"[DEBUG-VERL] ✅ GET 请求收到响应! 状态码: {response.status}")
+    #                         response.raise_for_status()
+    #                         res = await _read_async_response(response)
+    #                         return res
+    #                 else:
+    #                     async with session.post(url, json=payload or {}, timeout=timeout) as response:
+    #                         print(f"[DEBUG-VERL] ✅ POST 请求收到响应! 状态码: {response.status}")
+    #                         response.raise_for_status()
+    #                         res = await _read_async_response(response)
+    #                         return res
+
+    #         except asyncio.TimeoutError:
+    #             elapsed = time.time() - start_time
+    #             print(f"[DEBUG-VERL] ❌ 第 {attempt + 1} 次尝试发生 asyncio.TimeoutError (耗时 {elapsed:.2f} 秒)")
+    #             logger.warning(f"Async request to {endpoint} timed out (attempt {attempt + 1})")
+            
+    #         except aiohttp.ClientConnectorError as e:
+    #             print(f"[DEBUG-VERL] ❌ 拒绝连接 (ClientConnectorError): SGLang 服务器没在监听这个端口，或者被代理拦截了！")
+    #             print(f"[DEBUG-VERL] 详细错误: {e}")
+    #             logger.warning(f"Connection error for {endpoint} (attempt {attempt + 1})")
+            
+    #         except aiohttp.ClientResponseError as e:
+    #             print(f"[DEBUG-VERL] ❌ HTTP 请求失败 (状态码 {e.status}): {e.message}")
+    #             logger.error(f"HTTP error for {endpoint}: {e}")
+    #             raise
+            
+    #         except Exception as e:
+    #             print(f"[DEBUG-VERL] ❌ 发生未知异常: {type(e).__name__}")
+    #             print(f"[DEBUG-VERL] 异常详情: {e}")
+    #             traceback.print_exc()  # 打印完整的报错堆栈
+    #             logger.error(f"Unexpected error for {endpoint}: {e}")
+    #             if attempt == self.max_attempts - 1:
+    #                 raise
+
+    #         if attempt < self.max_attempts - 1:
+    #             sleep_time = self.retry_delay * (2**attempt)
+    #             print(f"[DEBUG-VERL] ⏳ 等待 {sleep_time} 秒后进行下一次重试...\n")
+    #             await asyncio.sleep(sleep_time)
+
+    #     print(f"\n[DEBUG-VERL] 💥 崩溃：所有 {self.max_attempts} 次请求均失败！")
+    #     raise RuntimeError(f"Failed to complete async request to {endpoint} after {self.max_attempts} attempts")
 
     async def release_memory_occupation(self, tags: Optional[list[str]] = None) -> dict[str, Any]:
         """Release GPU memory occupation temporarily (async version).

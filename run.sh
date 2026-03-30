@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=2 bash recipe/cleaner/qwen3_4b_cleaner_test.sh 
