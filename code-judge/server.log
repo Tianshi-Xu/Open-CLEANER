@@ -25,3 +25,9 @@ WARNING:  Invalid HTTP request received.
 [32mINFO[0m:     2026-03-29 19:04:44 - 162.105.130.11:39790 - "[1mGET / HTTP/1.1[0m" [31m404 Not Found[0m
 [32mINFO[0m:     2026-03-29 19:04:44 - 162.105.130.11:39791 - "[1mGET /this_is_404_page HTTP/1.1[0m" [31m404 Not Found[0m
 [32mINFO[0m:     2026-03-29 19:04:44 - 162.105.130.11:39792 - "[1mGET /this_is_404_page?waf_detect=value+AND+1%3D1+UNION+ALL+SELECT+1%2CNULL%2C%27%3Cscript%3Ealert%28%22XSS%22%29%3C%2Fscript%3E%27%2Ctable_name+FROM+information_schema.tables+WHERE+2%3E1--%2F%2A%2A%2F%3B+EXEC+xp_cmdshell%28%27cat+..%2F..%2F..%2Fetc%2Fpasswd%27%29%23 HTTP/1.1[0m" [31m404 Not Found[0m
+INFO:     Waiting for child process [244662]
+INFO:     Child process [244662] died
+INFO:     Started server process [633126]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Waiting for child process [244663]

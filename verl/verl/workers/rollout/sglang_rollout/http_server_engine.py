@@ -687,7 +687,6 @@ class AsyncHttpServerAdapter(HttpServerAdapter):
             return {}
 
         url = f"http://{self.server_args.host}:{self.server_args.port}/{endpoint}"
-        # print("url:",url)
         for attempt in range(self.max_attempts):
             try:
                 async with self._get_session() as session:

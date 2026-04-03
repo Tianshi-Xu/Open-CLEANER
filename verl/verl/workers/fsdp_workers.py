@@ -286,7 +286,6 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             AutoModel,
             AutoModelForCausalLM,
             AutoModelForImageTextToText,
-            AutoModelForVision2Seq,
         )
 
         from verl.utils.model import get_generation_config, print_model_size, update_model_config
@@ -356,8 +355,6 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                     k for k, v in actor_model_config.auto_map.items() if actor_model_config.architectures[0] in v
                 )
                 match auto_class:
-                    case "AutoModelForVision2Seq":
-                        actor_module_class = AutoModelForVision2Seq
                     case "AutoModelForCausalLM":
                         actor_module_class = AutoModelForCausalLM
                     case "AutoModelForImageTextToText":
@@ -365,9 +362,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                     case _:
                         actor_module_class = AutoModel
             else:
-                if type(actor_model_config) in AutoModelForVision2Seq._model_mapping.keys():
-                    actor_module_class = AutoModelForVision2Seq
-                elif type(actor_model_config) in AutoModelForCausalLM._model_mapping.keys():
+                if type(actor_model_config) in AutoModelForCausalLM._model_mapping.keys():
                     actor_module_class = AutoModelForCausalLM
                 elif type(actor_model_config) in AutoModelForImageTextToText._model_mapping.keys():
                     actor_module_class = AutoModelForImageTextToText

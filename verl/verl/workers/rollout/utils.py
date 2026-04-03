@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import asyncio
+import contextlib
 import ipaddress
 import logging
 import os
@@ -51,14 +52,36 @@ async def run_unvicorn(app: FastAPI, server_args, server_address, max_retries=5)
     for i in range(max_retries):
         try:
             server_port, sock = get_free_port(server_address)
+            sock.close()
+
             app.server_args = server_args
             config = uvicorn.Config(app, host=server_address, port=server_port, log_level="warning")
             server = uvicorn.Server(config)
-            server.should_exit = True
-            await server.serve()
-            server_task = asyncio.create_task(server.main_loop())
+            server.should_exit = False
+            server_task = asyncio.create_task(server.serve())
+
+            # Wait server startup, fail fast if task exits unexpectedly.
+            startup_timeout_s = 10.0
+            start_ts = asyncio.get_event_loop().time()
+            while not getattr(server, "started", False):
+                if server_task.done():
+                    exc = server_task.exception()
+                    raise RuntimeError(f"Uvicorn server task exited before startup, error: {exc!r}")
+
+                if asyncio.get_event_loop().time() - start_ts > startup_timeout_s:
+                    server.should_exit = True
+                    server_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await server_task
+                    raise TimeoutError(
+                        f"Timeout waiting uvicorn startup on {server_address}:{server_port}"
+                    )
+
+                await asyncio.sleep(0.1)
             break
         except (OSError, SystemExit) as e:
+            logger.error(f"Failed to start HTTP server on port {server_port} at try {i}, error: {e}")
+        except Exception as e:
             logger.error(f"Failed to start HTTP server on port {server_port} at try {i}, error: {e}")
     else:
         logger.error(f"Failed to start HTTP server after {max_retries} retries, exiting...")

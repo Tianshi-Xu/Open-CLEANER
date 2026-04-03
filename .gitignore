@@ -25,3 +25,5 @@ upload_model.py
 *.run
 *.tar
 *.gz
+gpustat_wheels
+gpustat_packages
