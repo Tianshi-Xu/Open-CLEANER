@@ -42,6 +42,7 @@ install_requires = [
     "wandb",
     "packaging>=20.0",
     "tensorboard",
+    "cachetools",
 ]
 
 TEST_REQUIRES = ["pytest", "pre-commit", "py-spy", "pytest-asyncio", "pytest-rerunfailures"]
