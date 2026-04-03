@@ -171,8 +171,9 @@ fi
     trainer.total_epochs=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.80 \
     custom_reward_function.name=compute_score_outcome_reward \
+    +algorithm.rollout_correction.rollout_is=token \
+    +algorithm.rollout_correction.rollout_is_threshold=2.0 \
     # +actor_rollout_ref.rollout.multi_turn.rollback_probability=0.7 \
-    # +algorithm.rollout_correction.rollout_is=${rollout_is} \
     # +algorithm.use_dpo_on_tool_calls=true \
     # +algorithm.dpo_beta=15 \
     # +algorithm.dpo_max_adjustment_ratio=0.10 \

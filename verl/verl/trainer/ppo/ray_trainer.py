@@ -1996,6 +1996,32 @@ class RayPPOTrainer:
                             # IS and off-policy metrics already have rollout_corr/ prefix
                             metrics.update(is_metrics)
 
+                        # Monitor IS weights specifically for rollback-replaced tokens
+                        if (
+                            "rollout_log_probs" in batch.batch
+                            and "old_log_probs" in batch.batch
+                            and "rollback_response_mask" in batch.batch
+                        ):
+                            rb_mask = batch.batch["rollback_response_mask"]  # (bsz, resp_len), float
+                            n_rb = rb_mask.sum()
+                            if n_rb > 0:
+                                log_ratio = batch.batch["old_log_probs"] - batch.batch["rollout_log_probs"]
+                                is_weights = torch.exp(log_ratio.clamp(-20.0, 20.0))
+                                # Mean IS weight (π_old / π_b) for rollback tokens
+                                metrics["rollout_corr/rollback_token_is_weight_mean"] = (
+                                    (is_weights * rb_mask).sum() / n_rb
+                                ).item()
+                                # Mean log ratio for rollback tokens (more stable for logging)
+                                metrics["rollout_corr/rollback_token_log_ratio_mean"] = (
+                                    (log_ratio * rb_mask).sum() / n_rb
+                                ).item()
+                                # Fraction of response tokens that are rollback tokens
+                                total_response_tokens = batch.batch["response_mask"].float().sum()
+                                metrics["rollout_corr/rollback_token_fraction"] = (
+                                    n_rb / total_response_tokens.clamp_min(1.0)
+                                ).item()
+                                print(f"rollback token is weight mean: {metrics['rollout_corr/rollback_token_is_weight_mean']:.4f}, rollback token log ratio mean: {metrics['rollout_corr/rollback_token_log_ratio_mean']:.4f}, rollback token fraction: {metrics['rollout_corr/rollback_token_fraction']:.4f}")
+
                         # compute advantages, executed on the driver process
                         norm_adv_by_std_in_grpo = self.config.algorithm.get(
                             "norm_adv_by_std_in_grpo", True

@@ -92,6 +92,7 @@ class RollbackManager:
             "response_ids": agent_data.response_ids,
             "response_mask": list(agent_data.response_mask),
             "response_logprobs": list(agent_data.response_logprobs) if agent_data.response_logprobs is not None else None,
+            "rollback_response_mask": list(agent_data.rollback_response_mask),
             "messages": copy.deepcopy(agent_data.messages),
             "image_data": agent_data.image_data,
             "assistant_turns": agent_data.assistant_turns,
@@ -104,6 +105,7 @@ class RollbackManager:
         agent_data.response_ids = checkpoint["response_ids"]
         agent_data.response_mask = checkpoint["response_mask"]
         agent_data.response_logprobs = checkpoint["response_logprobs"]
+        agent_data.rollback_response_mask = checkpoint.get("rollback_response_mask", [])
         agent_data.messages = checkpoint["messages"]
         agent_data.image_data = checkpoint["image_data"]
         agent_data.assistant_turns = checkpoint["assistant_turns"]
@@ -137,6 +139,7 @@ class AgentData:
         self.response_ids: list[int] = []
         self.response_mask: list[int] = []
         self.response_logprobs: Optional[list[float]] = None
+        self.rollback_response_mask: list[int] = []  # 1 for tokens replaced by rollback, 0 otherwise
         self.turn_scores: list[float] = []
         self.tool_rewards: list[float] = []
         self.user_turns = 0
@@ -307,6 +310,7 @@ class ToolAgentLoop(AgentLoopBase):
             response_mask=agent_data.response_mask[: self.response_length],
             multi_modal_data=multi_modal_data,
             response_logprobs=agent_data.response_logprobs[: self.response_length] if agent_data.response_logprobs is not None else None,
+            rollback_response_mask=agent_data.rollback_response_mask[: self.response_length],
             num_turns=agent_data.user_turns + agent_data.assistant_turns + 1,
             metrics=agent_data.metrics,
             extra_fields={},
@@ -388,6 +392,7 @@ class ToolAgentLoop(AgentLoopBase):
         agent_data.response_ids = output.token_ids
         agent_data.prompt_ids += agent_data.response_ids
         agent_data.response_mask += [1] * len(agent_data.response_ids)
+        agent_data.rollback_response_mask += [0] * len(agent_data.response_ids)
         if output.log_probs:
             if agent_data.response_logprobs is None:
                 agent_data.response_logprobs = []
@@ -653,6 +658,7 @@ class ToolAgentLoop(AgentLoopBase):
 
         agent_data.prompt_ids += response_ids
         agent_data.response_mask += [0] * len(response_ids)
+        agent_data.rollback_response_mask += [0] * len(response_ids)
         if agent_data.response_logprobs is not None:
             agent_data.response_logprobs += [0.0] * len(response_ids)
         agent_data.user_turns += 1
@@ -699,6 +705,7 @@ class ToolAgentLoop(AgentLoopBase):
         # Update prompt_ids and response_mask
         agent_data.prompt_ids += response_ids
         agent_data.response_mask += [0] * len(response_ids)
+        agent_data.rollback_response_mask += [0] * len(response_ids)
         if agent_data.response_logprobs is not None:
             agent_data.response_logprobs += [0.0] * len(response_ids)
 
@@ -870,6 +877,7 @@ class ToolAgentLoop(AgentLoopBase):
         error_prompt_ids = await self._encode_error_feedback(agent_data, error_message)
         agent_data.prompt_ids += error_prompt_ids
         agent_data.response_mask += [0] * len(error_prompt_ids)
+        agent_data.rollback_response_mask += [0] * len(error_prompt_ids)
         
         logprob_offset = None
         if agent_data.response_logprobs is not None:
@@ -985,11 +993,13 @@ class ToolAgentLoop(AgentLoopBase):
                     checkpoint["response_mask"] = checkpoint["response_mask"][:-old_call_len]
                     if checkpoint.get("response_logprobs") is not None:
                         checkpoint["response_logprobs"] = checkpoint["response_logprobs"][:-old_call_len]
+                    checkpoint["rollback_response_mask"] = checkpoint["rollback_response_mask"][:-old_call_len]
                 
                 # Add new tool call tokens
                 checkpoint["prompt_ids"].extend(new_segment["call_ids"])
                 checkpoint["response_mask"].extend([1] * new_call_len)
                 checkpoint["response_ids"] = old_segment["prefix_ids"] + new_segment["call_ids"]
+                checkpoint["rollback_response_mask"].extend([1] * new_call_len)
                 
                 # Handle logprobs
                 if checkpoint.get("response_logprobs"):
@@ -1053,11 +1063,13 @@ class ToolAgentLoop(AgentLoopBase):
             checkpoint["response_mask"] = checkpoint["response_mask"][:-old_response_len]
             if checkpoint.get("response_logprobs"):
                 checkpoint["response_logprobs"] = checkpoint["response_logprobs"][:-old_response_len]
+            checkpoint["rollback_response_mask"] = checkpoint["rollback_response_mask"][:-old_response_len]
         
         # Add new response
         checkpoint["prompt_ids"].extend(new_response_ids)
         checkpoint["response_mask"].extend([1] * len(new_response_ids))
         checkpoint["response_ids"] = list(new_response_ids)
+        checkpoint["rollback_response_mask"].extend([1] * len(new_response_ids))
         
         # Handle logprobs
         if checkpoint.get("response_logprobs"):

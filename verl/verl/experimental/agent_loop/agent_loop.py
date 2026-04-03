@@ -135,6 +135,8 @@ class AgentLoopOutput(BaseModel):
     """Response mask, 1 for LLM generated token, 0 for tool response token."""
     response_logprobs: Optional[list[float]] = None
     """Log probabilities for the response tokens."""
+    rollback_response_mask: Optional[list[int]] = None
+    """Per-token mask: 1 for tokens replaced by rollback mechanism, 0 otherwise."""
     routed_experts: Optional[Any] = None
     """Routed experts for the total tokens."""
     multi_modal_data: Optional[dict[str, Any]] = None
@@ -179,6 +181,8 @@ class _InternalAgentLoopOutput(AgentLoopOutput):
     """Padded attention mask."""
     response_logprobs: Optional[torch.Tensor] = None
     """Padded log probabilities for the response tokens."""
+    rollback_response_mask: Optional[torch.Tensor] = None
+    """Padded per-token rollback mask (1=rollback-replaced, 0=normal)."""
     routed_experts: Optional[torch.Tensor] = None
     """Padded routed experts for the total tokens."""
     multi_modal_inputs: Optional[dict[str, torch.Tensor]] = None
@@ -520,6 +524,13 @@ class AgentLoopWorkerBase:
             pad_size = self.config.actor_rollout_ref.rollout.response_length - len(output.response_logprobs)
             response_logprobs = torch.tensor(output.response_logprobs + [0.0] * pad_size).unsqueeze(0)
 
+        rollback_response_mask_tensor = None
+        if output.rollback_response_mask is not None and len(output.rollback_response_mask) > 0:
+            pad_size = self.config.actor_rollout_ref.rollout.response_length - len(output.rollback_response_mask)
+            rollback_response_mask_tensor = torch.tensor(
+                output.rollback_response_mask + [0] * pad_size, dtype=torch.float32
+            ).unsqueeze(0)
+
         response_mask = response_mask_output["input_ids"] * response_output["attention_mask"]
         attention_mask = torch.cat([prompt_output["attention_mask"], response_output["attention_mask"]], dim=1)
         input_ids = torch.cat([prompt_output["input_ids"], response_output["input_ids"]], dim=1)
@@ -616,6 +627,7 @@ class AgentLoopWorkerBase:
             response_mask=response_mask,
             attention_mask=attention_mask,
             response_logprobs=response_logprobs,
+            rollback_response_mask=rollback_response_mask_tensor,
             routed_experts=routed_experts,
             multi_modal_inputs=multi_modal_inputs,
             multi_modal_data=output.multi_modal_data,
@@ -644,6 +656,8 @@ class AgentLoopWorkerBase:
             optional_outputs["rollout_log_probs"] = torch.cat([input.response_logprobs for input in inputs], dim=0)
         if inputs[0].routed_experts is not None:
             optional_outputs["routed_experts"] = torch.cat([input.routed_experts for input in inputs], dim=0)
+        if inputs[0].rollback_response_mask is not None:
+            optional_outputs["rollback_response_mask"] = torch.cat([input.rollback_response_mask for input in inputs], dim=0)
 
         batch = TensorDict(
             {
