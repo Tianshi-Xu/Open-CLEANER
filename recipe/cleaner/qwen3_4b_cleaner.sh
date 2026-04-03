@@ -9,7 +9,7 @@ set -x
 train_dataset=dataset/Open-AgentRL-30K/Open-AgentRL-30K.parquet
 aime_2024=dataset/Open-AgentRL-Eval/aime2024/aime_2024_problems.parquet
 aime_2025=dataset/Open-AgentRL-Eval/aime2025/aime_2025_problems.parquet
-model_path=/path/to/your/Qwen3-4B-model
+model_path=pretrained_models/Qwen2.5-7B-RA-SFT
 
 train_files="['$train_dataset']"
 test_files="['$aime_2025', '$aime_2024']"

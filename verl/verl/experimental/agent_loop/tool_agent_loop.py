@@ -474,27 +474,27 @@ class ToolAgentLoop(AgentLoopBase):
                 )
 
                 # DEBUG: 打印回滚判断状态
-                print(f"[ROLLBACK_DEBUG] request_id={agent_data.request_id[:8]} | "
-                           f"tool_position_key={tool_position_key} | current_idx={current_idx} | "
-                           f"retry_count={retry_count} | waiting_for_correction={agent_data.waiting_for_correction} | "
-                           f"first_error_tool_idx={agent_data.first_error_tool_idx} | is_correction_attempt={is_correction_attempt}")
+                # print(f"[ROLLBACK_DEBUG] request_id={agent_data.request_id[:8]} | "
+                #            f"tool_position_key={tool_position_key} | current_idx={current_idx} | "
+                #            f"retry_count={retry_count} | waiting_for_correction={agent_data.waiting_for_correction} | "
+                #            f"first_error_tool_idx={agent_data.first_error_tool_idx} | is_correction_attempt={is_correction_attempt}")
 
                 if retry_count > 0:
                     # 已有重试记录，触发回滚
                     should_trigger_rollback = True
-                    print(f"[ROLLBACK_DEBUG] -> 触发回滚: 已有重试记录 (retry_count={retry_count})")
+                    # print(f"[ROLLBACK_DEBUG] -> 触发回滚: 已有重试记录 (retry_count={retry_count})")
                 elif is_correction_attempt:
                     # 修正后仍错误，触发回滚
                     should_trigger_rollback = True
                     agent_data.waiting_for_correction = False
                     agent_data.first_error_tool_idx = None
-                    print(f"[ROLLBACK_DEBUG] -> 触发回滚: 修正后仍错误")
+                    # print(f"[ROLLBACK_DEBUG] -> 触发回滚: 修正后仍错误")
                 else:
                     # 首次错误 → 不回滚，记录状态，等待修正
                     should_trigger_rollback = False
                     agent_data.first_error_tool_idx = current_idx
                     agent_data.waiting_for_correction = True
-                    print(f"[ROLLBACK_DEBUG] -> 首次错误不回滚，等待修正 (first_error_tool_idx={current_idx})")
+                    # print(f"[ROLLBACK_DEBUG] -> 首次错误不回滚，等待修正 (first_error_tool_idx={current_idx})")
 
                 if not should_trigger_rollback:
                     # Fall through to normal tool-response processing so the model sees the error.
@@ -535,9 +535,9 @@ class ToolAgentLoop(AgentLoopBase):
             else:
                 # Success — clear pending correction wait
                 # DEBUG: 打印成功清除状态
-                if agent_data.waiting_for_correction:
-                    print(f"[ROLLBACK_DEBUG] request_id={agent_data.request_id[:8]} | "
-                               f"修正成功，清除等待状态 (first_error_tool_idx={agent_data.first_error_tool_idx})")
+                # if agent_data.waiting_for_correction:
+                #     print(f"[ROLLBACK_DEBUG] request_id={agent_data.request_id[:8]} | "
+                #                f"修正成功，清除等待状态 (first_error_tool_idx={agent_data.first_error_tool_idx})")
                 agent_data.waiting_for_correction = False
                 agent_data.first_error_tool_idx = None
 
@@ -946,21 +946,21 @@ class ToolAgentLoop(AgentLoopBase):
             # is_first_turn = (checkpoint.get("assistant_turns", 0) == 1)
             # print("assistant_turns:",checkpoint.get("assistant_turns", 0))
             should_replace_reasoning = (similarity < 0.5)
-            print(f"\n{'='*70}")
-            print("✅ [ROLLBACK] Tool call replacement (token-level split)")
-            print(f"{'-'*70}")
-            print(f"Similarity: {similarity:.3f} | Strategy: {'Replace reasoning+tool call' if should_replace_reasoning else 'Replace tool call only'}")
-            print(f"{'-'*70}")
-            print(f"Old: {old_prefix_len} reasoning tokens + {old_call_len} tool call tokens")
-            print(f"Old reasoning text:\n{old_prefix_text}")
-            print(f"Old tool call text:\n{old_call_text}")
-            print(f"Tool error message: {error_message}")
-            print(f"Instruct message: {error_message}")
-            print(f"{'-'*70}")
-            print(f"New: {new_prefix_len} reasoning tokens + {new_call_len} tool call tokens")
-            print(f"New reasoning text:\n{new_prefix_text}")
-            print(f"New tool call text:\n{new_call_text}")
-            print(f"{'='*70}\n")
+            # print(f"\n{'='*70}")
+            # print("✅ [ROLLBACK] Tool call replacement (token-level split)")
+            # print(f"{'-'*70}")
+            # print(f"Similarity: {similarity:.3f} | Strategy: {'Replace reasoning+tool call' if should_replace_reasoning else 'Replace tool call only'}")
+            # print(f"{'-'*70}")
+            # print(f"Old: {old_prefix_len} reasoning tokens + {old_call_len} tool call tokens")
+            # print(f"Old reasoning text:\n{old_prefix_text}")
+            # print(f"Old tool call text:\n{old_call_text}")
+            # print(f"Tool error message: {error_message}")
+            # print(f"Instruct message: {error_message}")
+            # print(f"{'-'*70}")
+            # print(f"New: {new_prefix_len} reasoning tokens + {new_call_len} tool call tokens")
+            # print(f"New reasoning text:\n{new_prefix_text}")
+            # print(f"New tool call text:\n{new_call_text}")
+            # print(f"{'='*70}\n")
             
             if should_replace_reasoning:
                 # Similarity <= 0.5: Replace reasoning + tool call (full turn replacement)
