@@ -295,6 +295,33 @@ class SGLangHttpServer:
             log_probs = None
         return TokenOutput(token_ids=token_ids, log_probs=log_probs)
 
+    async def score(
+        self,
+        prompt_ids: list[int],
+        response_ids: list[int],
+        request_id: str,
+    ) -> list[float]:
+        """Score per-token log probabilities of response_ids given prompt_ids context.
+
+        Uses SGLang's input logprob feature (logprob_start_len) to evaluate the
+        probability of each token in response_ids under the given prompt context,
+        without generating new tokens beyond a minimal stub.
+
+        Returns a list of per-token log probs (one per token in response_ids).
+        """
+        all_ids = list(prompt_ids) + list(response_ids)
+        request = GenerateReqInput(
+            rid=request_id,
+            input_ids=all_ids,
+            sampling_params={"max_new_tokens": 1, "temperature": 0.0},
+            return_logprob=True,
+            logprob_start_len=len(prompt_ids),
+        )
+        output = await self.tokenizer_manager.generate_request(request, None).__anext__()
+        input_token_logprobs = output["meta_info"]["input_token_logprobs"]
+        # Each entry: (logprob, token_id, top_k_dict)
+        return [entry[0] for entry in input_token_logprobs]
+
 
 _rollout_worker_actor_cls = ray.remote(ServerAdapter)
 

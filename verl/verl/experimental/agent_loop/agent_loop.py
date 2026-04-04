@@ -116,6 +116,27 @@ class AsyncLLMServerManager:
         )
         return output
 
+    async def score(
+        self,
+        request_id: str,
+        *,
+        prompt_ids: list[int],
+        response_ids: list[int],
+    ) -> list[float]:
+        """Score per-token log probabilities of response_ids given prompt_ids context.
+
+        Uses sticky session (same server as request_id) to leverage KV-cache for efficiency.
+
+        Returns a list of per-token log probs (one per token in response_ids).
+        """
+        server = self._choose_server(request_id)
+        output = await server.score.remote(
+            request_id=uuid4().hex,
+            prompt_ids=prompt_ids,
+            response_ids=response_ids,
+        )
+        return output
+
 
 class AgentLoopMetrics(BaseModel):
     """Agent loop performance metrics."""

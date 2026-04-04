@@ -17,6 +17,7 @@ import difflib
 import json
 import json_repair
 import logging
+import math
 import os
 import random
 from enum import Enum
@@ -58,12 +59,18 @@ class RollbackManager:
     """Manages rollback mechanism for tool call errors."""
     
     def __init__(self, enable: bool, max_retries: int, error_patterns: list[str], 
-                 save_negative_samples: bool = False, max_negative_samples_per_group: int = 1):
+                 save_negative_samples: bool = False, max_negative_samples_per_group: int = 1,
+                 is_threshold: Optional[float] = None):
         self.enable = enable
         self.max_retries = max_retries
         self.error_patterns = error_patterns
         self.save_negative_samples = save_negative_samples
         self.max_negative_samples_per_group = max_negative_samples_per_group
+        # Plan B: IS-based rollback decision threshold.
+        # When set, _handle_rollback computes IS ratio = π_old(R|no_err_ctx) / π_b(R|err_ctx).
+        # If IS >= is_threshold → replace (trajectory without error context, near on-policy).
+        # If IS < is_threshold  → append (keep full on-policy trajectory including error).
+        self.is_threshold = is_threshold
     
     def can_retry(self, retry_counts: dict[str, int], position_key: str) -> bool:
         """Check if retry is allowed at this position."""
@@ -227,7 +234,9 @@ class ToolAgentLoop(AgentLoopBase):
         #CLEANER: config setting for negative samples
         save_negative_samples = config.actor_rollout_ref.rollout.multi_turn.get("save_negative_samples", False)
         max_negative_samples_per_group = config.actor_rollout_ref.rollout.multi_turn.get("max_negative_samples_per_group", 1)
-        self.rollback_manager = RollbackManager(enable_rollback, max_retries, error_patterns, save_negative_samples, max_negative_samples_per_group)
+        # Plan B: IS-based rollback decision threshold (None = disabled, use replace always)
+        rollback_is_threshold = config.actor_rollout_ref.rollout.multi_turn.get("rollback_is_threshold", None)
+        self.rollback_manager = RollbackManager(enable_rollback, max_retries, error_patterns, save_negative_samples, max_negative_samples_per_group, is_threshold=rollback_is_threshold)
         #CLEANER: Probability of enabling rollback per sample (0.0-1.0, default 1.0 means all samples have rollback)
         self.rollback_probability = config.actor_rollout_ref.rollout.multi_turn.get("rollback_probability", 1.0)
         #CLEANER: dynamic running control for negative sampling, only when both true, negative samples are collected 
@@ -464,49 +473,14 @@ class ToolAgentLoop(AgentLoopBase):
         error_messages, error_types = self._detect_errors(responses, tool_position_key, agent_data)
         
         # Handle rollback if enabled
-        is_retrying = agent_data.retry_counts.get(tool_position_key, 0) > 0
-        if self.rollback_manager.enable and (not agent_data.disable_rollback_after_max_retry or is_retrying):
+        if self.rollback_manager.enable and (not agent_data.disable_rollback_after_max_retry):
             if error_messages:
                 retry_count = agent_data.retry_counts.get(tool_position_key, 0)
-                current_idx = agent_data.tool_call_idx
 
-                # 判断是否是修正尝试（首次错误后的下一轮 tool call）
-                # 修正尝试 = 在等待修正 + 有首次错误记录 + 是紧接着的下一轮
-                is_correction_attempt = (
-                    agent_data.waiting_for_correction and
-                    agent_data.first_error_tool_idx is not None and
-                    current_idx == agent_data.first_error_tool_idx + 1
-                )
+                # Plan B: every error immediately triggers rollback (no 1-tolerance).
+                should_trigger_rollback = True
 
-                # DEBUG: 打印回滚判断状态
-                # print(f"[ROLLBACK_DEBUG] request_id={agent_data.request_id[:8]} | "
-                #            f"tool_position_key={tool_position_key} | current_idx={current_idx} | "
-                #            f"retry_count={retry_count} | waiting_for_correction={agent_data.waiting_for_correction} | "
-                #            f"first_error_tool_idx={agent_data.first_error_tool_idx} | is_correction_attempt={is_correction_attempt}")
-
-                if retry_count > 0:
-                    # 已有重试记录，触发回滚
-                    should_trigger_rollback = True
-                    # print(f"[ROLLBACK_DEBUG] -> 触发回滚: 已有重试记录 (retry_count={retry_count})")
-                elif is_correction_attempt:
-                    # 修正后仍错误，触发回滚
-                    should_trigger_rollback = True
-                    agent_data.waiting_for_correction = False
-                    agent_data.first_error_tool_idx = None
-                    # print(f"[ROLLBACK_DEBUG] -> 触发回滚: 修正后仍错误")
-                else:
-                    # 首次错误 → 不回滚，记录状态，等待修正
-                    should_trigger_rollback = False
-                    agent_data.first_error_tool_idx = current_idx
-                    agent_data.waiting_for_correction = True
-                    # print(f"[ROLLBACK_DEBUG] -> 首次错误不回滚，等待修正 (first_error_tool_idx={current_idx})")
-
-                if not should_trigger_rollback:
-                    # Fall through to normal tool-response processing so the model sees the error.
-                    pass
-                else:
-                    # Trigger the real rollback mechanism (correction failed or retry).
-
+                if should_trigger_rollback:
                     # Save/update negative sample on every rollback-triggering failure (if enabled)
                     if (self.negative_sampling_enabled and
                         not self.is_validation and
@@ -538,14 +512,6 @@ class ToolAgentLoop(AgentLoopBase):
                     if rollback_result is not None:
                         return rollback_result
             else:
-                # Success — clear pending correction wait
-                # DEBUG: 打印成功清除状态
-                # if agent_data.waiting_for_correction:
-                #     print(f"[ROLLBACK_DEBUG] request_id={agent_data.request_id[:8]} | "
-                #                f"修正成功，清除等待状态 (first_error_tool_idx={agent_data.first_error_tool_idx})")
-                agent_data.waiting_for_correction = False
-                agent_data.first_error_tool_idx = None
-
                 # Success after rollback-retry - persist negative sample
                 retry_count = agent_data.retry_counts.get(tool_position_key, 0)
                 if retry_count > 0:
@@ -909,6 +875,16 @@ class ToolAgentLoop(AgentLoopBase):
         if logprob_offset is not None and agent_data.response_logprobs is not None:
             new_response_logprobs = agent_data.response_logprobs[logprob_offset:]
         
+        # Plan B: IS-based replace vs. append decision
+        if self.rollback_manager.is_threshold is not None:
+            use_append = await self._decide_rollback_append(
+                agent_data, checkpoint, new_response_ids, new_response_logprobs
+            )
+            if use_append:
+                # Append path: trajectory already contains [original | old_resp | error | new_resp].
+                # This is fully on-policy for new_resp.  Just continue executing new tool calls.
+                return await self._handle_processing_tools_state(agent_data, sampling_params, tool_position_key)
+        
         new_assistant_message: Optional[dict[str, Any]] = None
         if self.interaction_config_file and agent_data.messages:
             last_message = agent_data.messages[-1]
@@ -923,121 +899,92 @@ class ToolAgentLoop(AgentLoopBase):
         # Step 6: Recursive retry
         return await self._handle_processing_tools_state(agent_data, sampling_params, tool_position_key)
     
+    async def _decide_rollback_append(
+        self,
+        agent_data: AgentData,
+        checkpoint: dict[str, Any],
+        new_response_ids: list[int],
+        new_response_logprobs: Optional[list[float]],
+    ) -> bool:
+        """Plan B: decide whether to append (keep full on-policy trajectory) or replace.
+
+        Computes IS ratio = π_old(R | no_error_ctx) / π_b(R | with_error_ctx) where:
+          - no_error_ctx = checkpoint prompt before the old response (no error feedback)
+          - with_error_ctx = full prompt including old response + error feedback (at generation time)
+
+        Returns True  → append path (IS < threshold, keep full trajectory, on-policy).
+                False → replace path (IS ≥ threshold, trajectory close to no-error distribution).
+        """
+        # no_error_ctx: everything before old_response in checkpoint
+        old_response_len = len(checkpoint.get("response_ids") or [])
+        if old_response_len > 0:
+            no_error_ctx = checkpoint["prompt_ids"][:-old_response_len]
+        else:
+            no_error_ctx = list(checkpoint["prompt_ids"])
+
+        # with_error_ctx: prompt at the moment new_response was generated
+        # = agent_data.prompt_ids[:-len(new_response_ids)]
+        with_error_ctx = agent_data.prompt_ids[:-len(new_response_ids)]
+
+        try:
+            # π_old(R | no_error_ctx) via scoring
+            no_error_logprobs = await self.server_manager.score(
+                agent_data.request_id,
+                prompt_ids=no_error_ctx,
+                response_ids=new_response_ids,
+            )
+            no_error_sum = sum(no_error_logprobs)
+
+            # π_b(R | with_error_ctx): prefer generation logprobs (free), else score separately
+            if new_response_logprobs is not None and len(new_response_logprobs) == len(new_response_ids):
+                with_error_sum = sum(new_response_logprobs)
+            else:
+                with_error_logprobs = await self.server_manager.score(
+                    agent_data.request_id,
+                    prompt_ids=with_error_ctx,
+                    response_ids=new_response_ids,
+                )
+                with_error_sum = sum(with_error_logprobs)
+
+            log_is = no_error_sum - with_error_sum
+            # Clamp to avoid numerical overflow
+            log_is = max(min(log_is, 20.0), -20.0)
+            is_ratio = math.exp(log_is)
+
+            logger.debug(
+                f"[Plan-B IS] log_is={log_is:.3f} is_ratio={is_ratio:.3f} "
+                f"threshold={self.rollback_manager.is_threshold:.3f} "
+                f"→ {'append' if is_ratio < self.rollback_manager.is_threshold else 'replace'}"
+            )
+            return is_ratio < self.rollback_manager.is_threshold
+
+        except Exception as e:
+            # Scoring failure: fall back to replace path to avoid silently broken trajectories
+            logger.warning(f"[Plan-B IS] score() failed ({e}), falling back to replace path")
+            return False
+
     def _overwrite_last_assistant_turn(
         self, checkpoint: dict[str, Any], new_response_ids: list[int],
         new_response_logprobs: Optional[list[float]], new_assistant_message: Optional[dict[str, Any]],
         error_message: Optional[str], agent_data: Optional[AgentData] = None
     ) -> None:
-        """Replace the last assistant response while preserving reasoning tokens when possible."""
+        """Replace the last assistant turn entirely with the new response (Plan B: always full replacement)."""
         old_response_ids = list(checkpoint.get("response_ids") or [])
-        old_segment = self._split_tool_call_segment(old_response_ids)
-        new_segment = self._split_tool_call_segment(new_response_ids)
-        replaced_tool_call = False
-        
-        if old_segment and new_segment and old_segment["call_ids"] and new_segment["call_ids"]:
-            old_call_len = len(old_segment["call_ids"])
-            new_call_len = len(new_segment["call_ids"])
-            old_prefix_len = len(old_segment["prefix_ids"])
-            new_prefix_len = len(new_segment["prefix_ids"])
-            
-            # Print tool call comparison
-            old_prefix_text = self._decode_response_text(old_segment["prefix_ids"])
-            old_call_text = self._decode_response_text(old_segment["call_ids"])
-            new_prefix_text = self._decode_response_text(new_segment["prefix_ids"])
-            new_call_text = self._decode_response_text(new_segment["call_ids"])
-            
-            # Calculate similarity between old and new tool calls
-            similarity = difflib.SequenceMatcher(None, old_call_text, new_call_text).ratio()
-            # If it's the first turn (checkpoint assistant_turns == 1), only do partial replacement (preserve reasoning)
-            # Use checkpoint value because agent_data.assistant_turns has been incremented during regeneration
-            # Otherwise, use similarity to decide
-            # is_first_turn = (checkpoint.get("assistant_turns", 0) == 1)
-            # print("assistant_turns:",checkpoint.get("assistant_turns", 0))
-            should_replace_reasoning = (similarity < 0.5)
-            # print(f"\n{'='*70}")
-            # print("✅ [ROLLBACK] Tool call replacement (token-level split)")
-            # print(f"{'-'*70}")
-            # print(f"Similarity: {similarity:.3f} | Strategy: {'Replace reasoning+tool call' if should_replace_reasoning else 'Replace tool call only'}")
-            # print(f"{'-'*70}")
-            # print(f"Old: {old_prefix_len} reasoning tokens + {old_call_len} tool call tokens")
-            # print(f"Old reasoning text:\n{old_prefix_text}")
-            # print(f"Old tool call text:\n{old_call_text}")
-            # print(f"Tool error message: {error_message}")
-            # print(f"Instruct message: {error_message}")
-            # print(f"{'-'*70}")
-            # print(f"New: {new_prefix_len} reasoning tokens + {new_call_len} tool call tokens")
-            # print(f"New reasoning text:\n{new_prefix_text}")
-            # print(f"New tool call text:\n{new_call_text}")
-            # print(f"{'='*70}\n")
-            
-            if should_replace_reasoning:
-                # Similarity <= 0.5: Replace reasoning + tool call (full turn replacement)
-                self._replace_full_turn(checkpoint, old_response_ids, new_response_ids, new_response_logprobs)
-                
-                # Update statistics
-                if agent_data is not None:
-                    agent_data.rollback_full_turn_count += 1
-                
-                # Update assistant message with new content
-                if new_assistant_message is not None:
-                    new_assistant_message["content"] = new_prefix_text + new_call_text
-            else:
-                # Similarity > 0.5: Replace tool call only (preserve reasoning)
-                # Update statistics
-                if agent_data is not None:
-                    agent_data.rollback_tool_call_only_count += 1
-                
-                # Remove old tool call tokens
-                if old_call_len:
-                    checkpoint["prompt_ids"] = checkpoint["prompt_ids"][:-old_call_len]
-                    checkpoint["response_mask"] = checkpoint["response_mask"][:-old_call_len]
-                    if checkpoint.get("response_logprobs") is not None:
-                        checkpoint["response_logprobs"] = checkpoint["response_logprobs"][:-old_call_len]
-                    checkpoint["rollback_response_mask"] = checkpoint["rollback_response_mask"][:-old_call_len]
-                
-                # Add new tool call tokens
-                checkpoint["prompt_ids"].extend(new_segment["call_ids"])
-                checkpoint["response_mask"].extend([1] * new_call_len)
-                checkpoint["response_ids"] = old_segment["prefix_ids"] + new_segment["call_ids"]
-                checkpoint["rollback_response_mask"].extend([1] * new_call_len)
-                
-                # Handle logprobs
-                if checkpoint.get("response_logprobs"):
-                    # Only process logprobs if checkpoint originally has logprobs
-                    if new_response_logprobs:
-                        call_start = len(new_segment["prefix_ids"])
-                        call_logprobs = list(new_response_logprobs[call_start:])
-                        if len(call_logprobs) != new_call_len:
-                            if len(call_logprobs) < new_call_len:
-                                call_logprobs.extend([0.0] * (new_call_len - len(call_logprobs)))
-                            else:
-                                call_logprobs = call_logprobs[:new_call_len]
-                    else:
-                        call_logprobs = [0.0] * new_call_len
-                    checkpoint["response_logprobs"].extend(call_logprobs)
-                
-                if new_assistant_message is not None:
-                    combined_text = old_segment["prefix_text"] + new_segment["call_text"]
-                    new_assistant_message["content"] = combined_text
-            
-            replaced_tool_call = True
-        # Don't generate a new tool call
-        if not replaced_tool_call:
-            # Fallback: replace whole assistant turn (same as low similarity strategy)
-            self._replace_full_turn(checkpoint, old_response_ids, new_response_ids, new_response_logprobs)
-            # Update statistics for fallback case
-            if agent_data is not None:
-                agent_data.rollback_full_turn_count += 1
-        
-        # Update assistant message
-        if new_assistant_message:
+
+        # Plan B always does a full turn replacement (no partial tool-call-only path).
+        self._replace_full_turn(checkpoint, old_response_ids, new_response_ids, new_response_logprobs)
+        if agent_data is not None:
+            agent_data.rollback_full_turn_count += 1
+
+        # Update assistant message in checkpoint if present
+        if new_assistant_message is not None:
+            new_text = self._decode_response_text(new_response_ids)
+            new_assistant_message["content"] = new_text
             for idx in range(len(checkpoint["messages"]) - 1, -1, -1):
                 message = checkpoint["messages"][idx]
                 if message.get("role") == "assistant":
                     checkpoint["messages"][idx] = new_assistant_message
                     break
-        
-        # Print replacement summary
         # old_text = self._decode_response_text(old_response_ids) if old_response_ids else ""
         # new_text = self._decode_response_text(checkpoint["response_ids"]) if checkpoint.get("response_ids") else ""
         # print(f"\n{'='*70}")
