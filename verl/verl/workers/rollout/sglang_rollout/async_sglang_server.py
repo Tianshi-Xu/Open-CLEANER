@@ -319,8 +319,8 @@ class SGLangHttpServer:
         )
         output = await self.tokenizer_manager.generate_request(request, None).__anext__()
         input_token_logprobs = output["meta_info"]["input_token_logprobs"]
-        # Each entry: (logprob, token_id, top_k_dict)
-        return [entry[0] for entry in input_token_logprobs]
+        # Each entry: (logprob, token_id, top_k_dict); logprob can be None for the first token
+        return [float(entry[0]) if entry[0] is not None else 0.0 for entry in input_token_logprobs]
 
 
 _rollout_worker_actor_cls = ray.remote(ServerAdapter)
