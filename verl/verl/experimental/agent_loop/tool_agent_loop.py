@@ -169,6 +169,8 @@ class AgentData:
         #CLEANER: Rollback strategy statistics
         self.rollback_full_turn_count = 0  # Count of full turn replacements
         self.rollback_tool_call_only_count = 0  # Count of tool call only replacements
+        self.rollback_append_count = 0   # Plan B: append path (IS < threshold)
+        self.rollback_replace_count = 0  # Plan B: replace path (IS >= threshold)
 
         #CLEANER: support rollback
         self.retry_counts: dict[str, int] = defaultdict(int)
@@ -345,6 +347,8 @@ class ToolAgentLoop(AgentLoopBase):
                 "global_rollback_failed": agent_data.global_rollback_failed,
                 "rollback_full_turn_count": agent_data.rollback_full_turn_count,
                 "rollback_tool_call_only_count": agent_data.rollback_tool_call_only_count,
+                "rollback_append_count": agent_data.rollback_append_count,
+                "rollback_replace_count": agent_data.rollback_replace_count,
             }
         )
         
@@ -887,10 +891,12 @@ class ToolAgentLoop(AgentLoopBase):
             if use_append:
                 # Append path: trajectory already contains [original | old_resp | error | new_resp].
                 # This is fully on-policy for new_resp.  Just continue executing new tool calls.
+                agent_data.rollback_append_count += 1
                 print(f"[ROLLBACK] ✅ APPEND path → trajectory length={len(agent_data.prompt_ids)} tokens "
                       f"(on-policy, keeping error context)")
                 return await self._handle_processing_tools_state(agent_data, sampling_params, tool_position_key)
             else:
+                agent_data.rollback_replace_count += 1
                 print(f"[ROLLBACK] ↩  REPLACE path → will overwrite old response + error from trajectory")
         
         new_assistant_message: Optional[dict[str, Any]] = None
@@ -1307,6 +1313,8 @@ class ToolAgentLoop(AgentLoopBase):
             "global_rollback_failed": 0,
             "rollback_full_turn_count": 0,
             "rollback_tool_call_only_count": 0,
+            "rollback_append_count": 0,
+            "rollback_replace_count": 0,
         }
         negative_sample_id = str(uuid4())
         return AgentLoopOutput(
