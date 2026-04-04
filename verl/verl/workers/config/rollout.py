@@ -62,6 +62,8 @@ class MultiTurnConfig(BaseConfig):
     max_tool_retries: int = 3
     rollback_on_errors: Optional[list[str]] = None
     rollback_probability: float = 1.0
+    # Plan B: IS-based rollback decision threshold (None = always replace)
+    rollback_is_threshold: Optional[float] = None
     #CLEANER: Negative sampling configuration
     save_negative_samples: bool = False
     max_negative_samples_per_group: int = 1
