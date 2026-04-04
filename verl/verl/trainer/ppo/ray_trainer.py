@@ -1825,15 +1825,13 @@ class RayPPOTrainer:
                         triggered = global_rollback_triggered.sum()
                         recovered = gen_batch_output.non_tensor_batch.get("global_rollback_recovered", [0]).sum()
                         failed = gen_batch_output.non_tensor_batch.get("global_rollback_failed", [0]).sum()
-                        full_rollback = gen_batch_output.non_tensor_batch.get("rollback_full_turn_count", [0]).sum()
-                        tool_call_only_rollback = gen_batch_output.non_tensor_batch.get("rollback_tool_call_only_count", [0]).sum()
+                        full_rollback = gen_batch_output.non_tensor_batch.get("rollback_append_count", [0]).sum() + \
+                                        gen_batch_output.non_tensor_batch.get("rollback_replace_count", [0]).sum()
                         append_count = gen_batch_output.non_tensor_batch.get("rollback_append_count", [0]).sum()
                         replace_count = gen_batch_output.non_tensor_batch.get("rollback_replace_count", [0]).sum()
                         metrics["rollback/global_triggered"] = triggered
                         metrics["rollback/global_recovered"] = recovered
                         metrics["rollback/global_failed"] = failed
-                        metrics["rollback/rollback_full_turn_count"] = full_rollback
-                        metrics["rollback/rollback_tool_call_only_count"] = tool_call_only_rollback
                         metrics["rollback/planb_append_count"] = append_count
                         metrics["rollback/planb_replace_count"] = replace_count
                         if append_count + replace_count > 0:
@@ -1842,7 +1840,7 @@ class RayPPOTrainer:
                         # Calculate recovery rate
                         if triggered > 0:
                             metrics["rollback/global_recovery_rate"] = recovered / triggered
-                        print(f"rollback triggered: {triggered}, recovered: {recovered}, failed: {failed}, full rollback turns: {full_rollback}, tool-call-only rollbacks: {tool_call_only_rollback}")
+                        print(f"rollback triggered: {triggered}, recovered: {recovered}, failed: {failed}, total IS decisions: {full_rollback}")
                         print(f"Plan-B: append={append_count}, replace={replace_count}, append_rate={append_count/(append_count+replace_count):.2%}" if (append_count+replace_count) > 0 else "Plan-B: no IS decisions this step")
                     
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:

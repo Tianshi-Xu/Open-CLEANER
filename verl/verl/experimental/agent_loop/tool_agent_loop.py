@@ -167,8 +167,6 @@ class AgentData:
         self.global_rollback_failed = 0
         
         #CLEANER: Rollback strategy statistics
-        self.rollback_full_turn_count = 0  # Count of full turn replacements
-        self.rollback_tool_call_only_count = 0  # Count of tool call only replacements
         self.rollback_append_count = 0   # Plan B: append path (IS < threshold)
         self.rollback_replace_count = 0  # Plan B: replace path (IS >= threshold)
 
@@ -345,8 +343,6 @@ class ToolAgentLoop(AgentLoopBase):
                 "global_rollback_triggered": agent_data.global_rollback_triggered,
                 "global_rollback_recovered": agent_data.global_rollback_recovered,
                 "global_rollback_failed": agent_data.global_rollback_failed,
-                "rollback_full_turn_count": agent_data.rollback_full_turn_count,
-                "rollback_tool_call_only_count": agent_data.rollback_tool_call_only_count,
                 "rollback_append_count": agent_data.rollback_append_count,
                 "rollback_replace_count": agent_data.rollback_replace_count,
             }
@@ -1040,7 +1036,7 @@ class ToolAgentLoop(AgentLoopBase):
         # Plan B always does a full turn replacement (no partial tool-call-only path).
         self._replace_full_turn(checkpoint, old_response_ids, new_response_ids, new_response_logprobs)
         if agent_data is not None:
-            agent_data.rollback_full_turn_count += 1
+            pass  # replace count already tracked at _handle_rollback call site
 
         # Update assistant message in checkpoint if present
         if new_assistant_message is not None:
@@ -1311,8 +1307,6 @@ class ToolAgentLoop(AgentLoopBase):
             "global_rollback_triggered": 0,
             "global_rollback_recovered": 0,
             "global_rollback_failed": 0,
-            "rollback_full_turn_count": 0,
-            "rollback_tool_call_only_count": 0,
             "rollback_append_count": 0,
             "rollback_replace_count": 0,
         }
