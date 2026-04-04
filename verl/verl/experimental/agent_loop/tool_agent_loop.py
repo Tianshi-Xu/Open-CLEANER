@@ -836,6 +836,10 @@ class ToolAgentLoop(AgentLoopBase):
         
         # Step 1: Append error feedback as tool response
         error_feedback = self.rollback_manager.format_error_feedback(error_messages, error_types)
+        print(f"\n[ROLLBACK] ▶ trigger  key={tool_position_key}  "
+              f"retry={agent_data.retry_counts.get(tool_position_key, 0)}  "
+              f"error_type={error_types[-1] if error_types else '?'}")
+        print(f"[ROLLBACK]   error_msg (tail 200): ...{error_feedback[-200:]!r}")
         error_message = {"role": "tool", "content": error_feedback}
         agent_data.messages.append(error_message)
         
@@ -883,7 +887,11 @@ class ToolAgentLoop(AgentLoopBase):
             if use_append:
                 # Append path: trajectory already contains [original | old_resp | error | new_resp].
                 # This is fully on-policy for new_resp.  Just continue executing new tool calls.
+                print(f"[ROLLBACK] ✅ APPEND path → trajectory length={len(agent_data.prompt_ids)} tokens "
+                      f"(on-policy, keeping error context)")
                 return await self._handle_processing_tools_state(agent_data, sampling_params, tool_position_key)
+            else:
+                print(f"[ROLLBACK] ↩  REPLACE path → will overwrite old response + error from trajectory")
         
         new_assistant_message: Optional[dict[str, Any]] = None
         if self.interaction_config_file and agent_data.messages:
@@ -926,6 +934,39 @@ class ToolAgentLoop(AgentLoopBase):
         # = agent_data.prompt_ids[:-len(new_response_ids)]
         with_error_ctx = agent_data.prompt_ids[:-len(new_response_ids)]
 
+        # ── DEBUG header ──────────────────────────────────────────────────────
+        def _tail(ids: list[int], n: int = 200) -> str:
+            """Decode last n chars of a token list for context preview."""
+            text = self.tokenizer.decode(ids, skip_special_tokens=False)
+            return text[-n:] if len(text) > n else text
+
+        def _logprob_summary(lps: list[float], ids: list[int], n_head: int = 6, n_tail: int = 4) -> str:
+            """Print first/last few (token, logprob) pairs with running sum."""
+            tokens = [self.tokenizer.decode([t], skip_special_tokens=False) for t in ids]
+            pairs = list(zip(tokens, lps))
+            shown = pairs[:n_head]
+            if len(pairs) > n_head + n_tail:
+                shown.append(("...", float("nan")))
+            if len(pairs) > n_head:
+                shown.extend(pairs[-n_tail:])
+            lines = []
+            for tok, lp in shown:
+                tok_repr = repr(tok)
+                lines.append(f"  {tok_repr:>20s}  {lp:+.4f}" if not math.isnan(lp) else f"  {'...':>20s}")
+            return "\n".join(lines)
+
+        print(f"\n{'='*72}")
+        print(f"[PLAN-B IS DEBUG] request={agent_data.request_id[:12]}  "
+              f"retry={agent_data.retry_counts.get('turn_' + str(checkpoint.get('assistant_turns', '?')), '?')}")
+        print(f"  no_error_ctx  : {len(no_error_ctx):5d} tokens  "
+              f"tail → ...{_tail(no_error_ctx, 200)!r}")
+        print(f"  with_error_ctx: {len(with_error_ctx):5d} tokens  "
+              f"tail → ...{_tail(with_error_ctx, 200)!r}")
+        print(f"  new_response  : {len(new_response_ids):5d} tokens")
+        print(f"  new_response text:\n{self.tokenizer.decode(new_response_ids, skip_special_tokens=False)}")
+        print(f"{'-'*72}")
+        # ──────────────────────────────────────────────────────────────────────
+
         try:
             # π_old(R | no_error_ctx) via scoring
             no_error_logprobs = await self.server_manager.score(
@@ -936,29 +977,48 @@ class ToolAgentLoop(AgentLoopBase):
             no_error_sum = sum(no_error_logprobs)
 
             # π_b(R | with_error_ctx): prefer generation logprobs (free), else score separately
-            if new_response_logprobs is not None and len(new_response_logprobs) == len(new_response_ids):
+            from_generation = (
+                new_response_logprobs is not None
+                and len(new_response_logprobs) == len(new_response_ids)
+            )
+            if from_generation:
+                with_error_logprobs_used = new_response_logprobs
                 with_error_sum = sum(new_response_logprobs)
+                pi_b_source = "generation logprobs (calculate_log_probs=True)"
             else:
-                with_error_logprobs = await self.server_manager.score(
+                with_error_logprobs_used = await self.server_manager.score(
                     agent_data.request_id,
                     prompt_ids=with_error_ctx,
                     response_ids=new_response_ids,
                 )
-                with_error_sum = sum(with_error_logprobs)
+                with_error_sum = sum(with_error_logprobs_used)
+                pi_b_source = "score() call (calculate_log_probs=False)"
 
             log_is = no_error_sum - with_error_sum
             # Clamp to avoid numerical overflow
-            log_is = max(min(log_is, 20.0), -20.0)
-            is_ratio = math.exp(log_is)
+            log_is_clamped = max(min(log_is, 20.0), -20.0)
+            is_ratio = math.exp(log_is_clamped)
+            decision = "APPEND  (keep full on-policy trajectory)" if is_ratio < self.rollback_manager.is_threshold else "REPLACE (trajectory near no-error dist)"
 
-            logger.debug(
-                f"[Plan-B IS] log_is={log_is:.3f} is_ratio={is_ratio:.3f} "
-                f"threshold={self.rollback_manager.is_threshold:.3f} "
-                f"→ {'append' if is_ratio < self.rollback_manager.is_threshold else 'replace'}"
-            )
+            # ── DEBUG per-token breakdown ──────────────────────────────────
+            print(f"[π_old | no_error_ctx]  sum_logprob = {no_error_sum:.4f}  (avg/tok = {no_error_sum/max(len(new_response_ids),1):.4f})")
+            print(_logprob_summary(no_error_logprobs, new_response_ids))
+            print(f"[π_b   | with_error_ctx]  sum_logprob = {with_error_sum:.4f}  "
+                  f"(avg/tok = {with_error_sum/max(len(new_response_ids),1):.4f})  source: {pi_b_source}")
+            print(_logprob_summary(with_error_logprobs_used, new_response_ids))
+            print(f"{'-'*72}")
+            print(f"log_IS (raw)    = {log_is:+.4f}   (clamped → {log_is_clamped:+.4f})")
+            print(f"IS ratio        = {is_ratio:.6f}")
+            print(f"threshold       = {self.rollback_manager.is_threshold:.6f}")
+            print(f"decision        → {decision}")
+            print(f"{'='*72}\n")
+            # ──────────────────────────────────────────────────────────────
+
             return is_ratio < self.rollback_manager.is_threshold
 
         except Exception as e:
+            print(f"[PLAN-B IS DEBUG] score() FAILED: {e!r}  → fallback to REPLACE")
+            print(f"{'='*72}\n")
             # Scoring failure: fall back to replace path to avoid silently broken trajectories
             logger.warning(f"[Plan-B IS] score() failed ({e}), falling back to replace path")
             return False
@@ -985,18 +1045,16 @@ class ToolAgentLoop(AgentLoopBase):
                 if message.get("role") == "assistant":
                     checkpoint["messages"][idx] = new_assistant_message
                     break
-        # old_text = self._decode_response_text(old_response_ids) if old_response_ids else ""
-        # new_text = self._decode_response_text(checkpoint["response_ids"]) if checkpoint.get("response_ids") else ""
-        # print(f"\n{'='*70}")
-        # print("📝 [REPLACEMENT SUMMARY]")
-        # print(f"{'-'*70}")
-        # print(f"Old response ({len(old_response_ids)} tokens):")
-        # print(f"{old_text}")
-        # print(f"{'-'*70}")
-        # print(f"New response ({len(checkpoint['response_ids'])} tokens):")
-        # print(f"{new_text}")
-        # print(f"{'='*70}\n")
-    
+        old_text = self._decode_response_text(old_response_ids) if old_response_ids else ""
+        new_text = self._decode_response_text(checkpoint["response_ids"]) if checkpoint.get("response_ids") else ""
+        print(f"\n{'='*70}")
+        print("📝 [REPLACE SUMMARY] old → new")
+        print(f"{'-'*70}")
+        print(f"Old response ({len(old_response_ids)} tokens):\n{old_text}")
+        print(f"{'-'*70}")
+        print(f"New response ({len(checkpoint['response_ids'])} tokens):\n{new_text}")
+        print(f"{'='*70}\n")
+
     def _replace_full_turn(
         self, checkpoint: dict[str, Any], old_response_ids: list[int],
         new_response_ids: list[int], new_response_logprobs: Optional[list[float]]
