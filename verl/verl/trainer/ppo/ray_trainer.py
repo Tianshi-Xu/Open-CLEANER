@@ -19,6 +19,7 @@ This trainer supports model-agonistic model initialization with huggingface
 """
 
 import json
+import math
 import os
 import uuid
 from collections import defaultdict
@@ -2006,21 +2007,26 @@ class RayPPOTrainer:
                             n_rb = rb_mask.sum()
                             if n_rb > 0:
                                 log_ratio = batch.batch["old_log_probs"] - batch.batch["rollout_log_probs"]
-                                is_weights = torch.exp(log_ratio.clamp(-20.0, 20.0))
-                                # Mean IS weight (π_old / π_b) for rollback tokens
-                                metrics["rollout_corr/rollback_token_is_weight_mean"] = (
-                                    (is_weights * rb_mask).sum() / n_rb
-                                ).item()
-                                # Mean log ratio for rollback tokens (more stable for logging)
-                                metrics["rollout_corr/rollback_token_log_ratio_mean"] = (
-                                    (log_ratio * rb_mask).sum() / n_rb
-                                ).item()
-                                # Fraction of response tokens that are rollback tokens
+                                # Mean log ratio in log-space (numerically stable)
+                                mean_log_ratio = ((log_ratio * rb_mask).sum() / n_rb).item()
+                                metrics["rollout_corr/rollback_token_log_ratio_mean"] = mean_log_ratio
+                                # Geometric-mean IS = exp(mean log ratio): directly comparable to
+                                # rollback_is_threshold; arithmetic mean is misleadingly large
+                                # due to Jensen's inequality (E[exp(X)] >> exp(E[X])).
+                                metrics["rollout_corr/rollback_token_is_geom_mean"] = math.exp(
+                                    max(min(mean_log_ratio, 20.0), -20.0)
+                                )
+                                # Fraction of response tokens that are rollback-replaced tokens
                                 total_response_tokens = batch.batch["response_mask"].float().sum()
                                 metrics["rollout_corr/rollback_token_fraction"] = (
                                     n_rb / total_response_tokens.clamp_min(1.0)
                                 ).item()
-                                print(f"rollback token is weight mean: {metrics['rollout_corr/rollback_token_is_weight_mean']:.4f}, rollback token log ratio mean: {metrics['rollout_corr/rollback_token_log_ratio_mean']:.4f}, rollback token fraction: {metrics['rollout_corr/rollback_token_fraction']:.4f}")
+                                print(
+                                    f"rollback IS_geom(replace tokens): "
+                                    f"{metrics['rollout_corr/rollback_token_is_geom_mean']:.4f}, "
+                                    f"log_ratio_mean: {metrics['rollout_corr/rollback_token_log_ratio_mean']:.4f}, "
+                                    f"rollback_token_fraction: {metrics['rollout_corr/rollback_token_fraction']:.4f}"
+                                )
 
                         # compute advantages, executed on the driver process
                         norm_adv_by_std_in_grpo = self.config.algorithm.get(

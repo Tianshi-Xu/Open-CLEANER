@@ -67,7 +67,7 @@ infer_dp=1
 infer_tp=1 # sglang
 train_sp=1 # train
 offload=True
-num_GPU=8
+num_GPU=4
 
 
 actor_max_token_len_per_gpu=$(( (max_prompt_length + max_response_length) * 1 ))
@@ -167,12 +167,12 @@ fi
     +actor_rollout_ref.rollout.multi_turn.save_negative_samples=False \
     +actor_rollout_ref.rollout.multi_turn.max_negative_samples_per_group=0 \
     actor_rollout_ref.rollout.over_sample_rate=0.0 \
-    actor_rollout_ref.rollout.calculate_log_probs=False \
+    actor_rollout_ref.rollout.calculate_log_probs=True \
     trainer.total_epochs=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.80 \
     custom_reward_function.name=compute_score_outcome_reward \
-    +algorithm.rollout_correction.rollout_is=token \
-    +algorithm.rollout_correction.rollout_is_threshold=2.0 \
+    # +algorithm.rollout_correction.rollout_is=token \
+    # +algorithm.rollout_correction.rollout_is_threshold=2.0 \
     # +actor_rollout_ref.rollout.multi_turn.rollback_probability=0.7 \
     # +algorithm.use_dpo_on_tool_calls=true \
     # +algorithm.dpo_beta=15 \
