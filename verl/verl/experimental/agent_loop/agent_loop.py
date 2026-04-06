@@ -131,7 +131,7 @@ class AsyncLLMServerManager:
         """
         server = self._choose_server(request_id)
         output = await server.score.remote(
-            request_id=uuid4().hex,
+            request_id=f"{request_id}_score",
             prompt_ids=prompt_ids,
             response_ids=response_ids,
         )

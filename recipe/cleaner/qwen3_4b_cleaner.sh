@@ -166,7 +166,7 @@ fi
     +actor_rollout_ref.rollout.multi_turn.max_negative_samples_per_group=0 \
     +actor_rollout_ref.rollout.multi_turn.enable_tool_rollback=True \
     +actor_rollout_ref.rollout.multi_turn.max_tool_retries=3 \
-    +actor_rollout_ref.rollout.multi_turn.rollback_is_threshold=0.5 \
+    +actor_rollout_ref.rollout.multi_turn.rollback_is_threshold=0.9 \
     custom_reward_function.name=compute_score_outcome_reward \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.80 \
     # trainer.resume_mode=resume_path \

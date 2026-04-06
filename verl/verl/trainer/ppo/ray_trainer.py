@@ -19,6 +19,7 @@ This trainer supports model-agonistic model initialization with huggingface
 """
 
 import json
+import math
 import os
 import uuid
 from collections import defaultdict
@@ -1840,7 +1841,13 @@ class RayPPOTrainer:
                         # Calculate recovery rate
                         if triggered > 0:
                             metrics["rollback/global_recovery_rate"] = recovered / triggered
-                        print(f"rollback triggered: {triggered}, recovered: {recovered}, failed: {failed}, total IS decisions: {full_rollback}")
+                        retries_extra = int(full_rollback) - int(triggered)
+                        print(
+                            f"rollback triggered(unique pos): {triggered}, "
+                            f"recovered: {recovered}, failed: {failed} | "
+                            f"total IS calls: {full_rollback} "
+                            f"(+{retries_extra} retries, avg {full_rollback/max(triggered,1):.2f}/pos)"
+                        )
                         print(f"Plan-B: append={append_count}, replace={replace_count}, append_rate={append_count/(append_count+replace_count):.2%}" if (append_count+replace_count) > 0 else "Plan-B: no IS decisions this step")
                     
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
@@ -2011,21 +2018,22 @@ class RayPPOTrainer:
                             n_rb = rb_mask.sum()
                             if n_rb > 0:
                                 log_ratio = batch.batch["old_log_probs"] - batch.batch["rollout_log_probs"]
-                                is_weights = torch.exp(log_ratio.clamp(-20.0, 20.0))
-                                # Mean IS weight (π_old / π_b) for rollback tokens
-                                metrics["rollout_corr/rollback_token_is_weight_mean"] = (
-                                    (is_weights * rb_mask).sum() / n_rb
-                                ).item()
-                                # Mean log ratio for rollback tokens (more stable for logging)
-                                metrics["rollout_corr/rollback_token_log_ratio_mean"] = (
-                                    (log_ratio * rb_mask).sum() / n_rb
-                                ).item()
+                                # Mean log ratio for rollback tokens (log-space, numerically stable)
+                                mean_log_ratio = ((log_ratio * rb_mask).sum() / n_rb).item()
+                                metrics["rollout_corr/rollback_token_log_ratio_mean"] = mean_log_ratio
+                                # Geometric-mean IS weight: exp(mean log ratio) — interpretable,
+                                # matches the IS_geom threshold used in _decide_rollback_append.
+                                # Arithmetic mean (E[exp(log_ratio)]) is dominated by outlier tokens
+                                # and gives misleadingly large values (Jensen's inequality).
+                                metrics["rollout_corr/rollback_token_is_geom_mean"] = math.exp(
+                                    max(min(mean_log_ratio, 20.0), -20.0)
+                                )
                                 # Fraction of response tokens that are rollback tokens
                                 total_response_tokens = batch.batch["response_mask"].float().sum()
                                 metrics["rollout_corr/rollback_token_fraction"] = (
                                     n_rb / total_response_tokens.clamp_min(1.0)
                                 ).item()
-                                print(f"rollback token is weight mean: {metrics['rollout_corr/rollback_token_is_weight_mean']:.4f}, rollback token log ratio mean: {metrics['rollout_corr/rollback_token_log_ratio_mean']:.4f}, rollback token fraction: {metrics['rollout_corr/rollback_token_fraction']:.4f}")
+                                print(f"rollback IS_geom(replace tokens): {metrics['rollout_corr/rollback_token_is_geom_mean']:.4f}, log_ratio_mean: {metrics['rollout_corr/rollback_token_log_ratio_mean']:.4f}, rollback_token_fraction: {metrics['rollout_corr/rollback_token_fraction']:.4f}")
 
                         # compute advantages, executed on the driver process
                         norm_adv_by_std_in_grpo = self.config.algorithm.get(

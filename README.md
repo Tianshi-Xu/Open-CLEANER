@@ -105,8 +105,8 @@ After downloading the datasets and SFT checkpoints, follow the steps below to st
     ```bash
     redis-server --daemonize yes --protected-mode no --bind 0.0.0.0
     redis-cli ping
-    tmux new-session -d -s server 'cd ./code-judge && MAX_EXECUTION_TIME=4 REDIS_URI="redis://localhost:6379" RUN_WORKERS=0 uvicorn app.main:app --host 0.0.0.0 --port 8088 --workers 4 2>&1 | tee server.log'
-    tmux new-session -d -s worker 'cd ./code-judge && MAX_EXECUTION_TIME=4 REDIS_URI="redis://localhost:6379" MAX_WORKERS=16 python run_workers.py 2>&1 | tee worker.log'
+    tmux new-session -d -s server 'cd ./code-judge && MAX_EXECUTION_TIME=4 REDIS_URI="redis://localhost:6379" RUN_WORKERS=0 uvicorn app.main:app --host 0.0.0.0 --port 8088 --workers 16 2>&1 | tee server.log'
+    tmux new-session -d -s worker 'cd ./code-judge && MAX_EXECUTION_TIME=4 REDIS_URI="redis://localhost:6379" MAX_WORKERS=64 python run_workers.py 2>&1 | tee worker.log'
     ```
 
   - Verify the service:

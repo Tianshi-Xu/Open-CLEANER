@@ -317,7 +317,11 @@ class SGLangHttpServer:
             return_logprob=True,
             logprob_start_len=len(prompt_ids),
         )
-        output = await self.tokenizer_manager.generate_request(request, None).__anext__()
+        gen = self.tokenizer_manager.generate_request(request, None)
+        try:
+            output = await gen.__anext__()
+        finally:
+            await gen.aclose()
         input_token_logprobs = output["meta_info"]["input_token_logprobs"]
         # Each entry: (logprob, token_id, top_k_dict); logprob can be None for the first token
         return [float(entry[0]) if entry[0] is not None else 0.0 for entry in input_token_logprobs]

@@ -1,11 +1,12 @@
 #!/bin/bash
 # export WANDB_API_KEY="YOUR_WANDB_KEY"
+export WANDB_MODE=offline
 set -x
 
 # AMLT_DATA_DIR will be automatically prepended to MODEL_PATH if set
 # export AMLT_DATA_DIR="/path/to/your/data"
 
-train_dataset=dataset/Open-AgentRL-30K/Open-AgentRL-30K.parquet
+train_dataset=dataset/Open-AgentRL-30K/filtered_sr.parquet
 aime_2024=dataset/Open-AgentRL-Eval/aime2024/aime_2024_problems.parquet
 aime_2025=dataset/Open-AgentRL-Eval/aime2025/aime_2025_problems.parquet
 model_path=models/Qwen2.5-7B-RA-SFT
@@ -18,7 +19,7 @@ tool_config_path=recipe/cleaner/rstar_code_judge.yaml
 
 # wandb
 project_name=Open-CLEANER
-experiment_name=Qwen2-7B-CLEANER
+experiment_name=Qwen2-7B-CLEANER-v3
 default_local_dir=output/$experiment_name
 resume_dir=Qwen2-7B/global_step_30
 
@@ -59,15 +60,15 @@ actor_lr=1e-6
 
 train_batch_size=128
 ppo_mini_batch_size=32
-n_resp_per_prompt=16
-n_resp_per_prompt_val=16
+n_resp_per_prompt=8
+n_resp_per_prompt_val=8
 
 # ================= perfomance =================
 infer_dp=1
 infer_tp=1 # sglang
 train_sp=1 # train
 offload=True
-num_GPU=8
+num_GPU=1
 
 
 actor_max_token_len_per_gpu=$(( (max_prompt_length + max_response_length) * 1 ))
@@ -149,9 +150,9 @@ fi
     trainer.log_val_generations=20 \
     trainer.validation_data_dir=$VAL_SAVE_PATH \
     trainer.nnodes=1 \
-    trainer.save_freq=50 \
+    trainer.save_freq=10 \
     trainer.default_local_dir=$default_local_dir \
-    trainer.test_freq=50 \
+    trainer.test_freq=10 \
     actor_rollout_ref.actor.strategy=fsdp2 \
     actor_rollout_ref.model.use_fused_kernels=True \
     actor_rollout_ref.model.fused_kernel_options.impl_backend=triton \
@@ -167,12 +168,13 @@ fi
     +actor_rollout_ref.rollout.multi_turn.save_negative_samples=False \
     +actor_rollout_ref.rollout.multi_turn.max_negative_samples_per_group=0 \
     actor_rollout_ref.rollout.over_sample_rate=0.0 \
-    actor_rollout_ref.rollout.calculate_log_probs=False \
-    trainer.total_epochs=1 \
+    actor_rollout_ref.rollout.calculate_log_probs=True \
+    trainer.total_epochs=2 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.80 \
     custom_reward_function.name=compute_score_outcome_reward \
     +algorithm.rollout_correction.rollout_is=token \
     +algorithm.rollout_correction.rollout_is_threshold=2.0 \
+    +actor_rollout_ref.rollout.multi_turn.rollback_is_threshold=0.9 \
     # +actor_rollout_ref.rollout.multi_turn.rollback_probability=0.7 \
     # +algorithm.use_dpo_on_tool_calls=true \
     # +algorithm.dpo_beta=15 \

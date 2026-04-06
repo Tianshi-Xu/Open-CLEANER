@@ -157,7 +157,7 @@ fi
     actor_rollout_ref.actor.fsdp_config.param_offload=$offload \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=$offload \
     actor_rollout_ref.rollout.over_sample_rate=0.0 \
-    actor_rollout_ref.rollout.calculate_log_probs=False \
+    actor_rollout_ref.rollout.calculate_log_probs=True \
     actor_rollout_ref.actor.optim.lr_warmup_steps=20 \
     trainer.total_epochs=1 \
     actor_rollout_ref.actor.fsdp_config.dtype=float16 \
@@ -168,7 +168,8 @@ fi
     +actor_rollout_ref.rollout.multi_turn.max_tool_retries=3 \
     custom_reward_function.name=compute_score_outcome_reward \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.80 \
-    actor_rollout_ref.rollout.agent.num_workers=1
+    +actor_rollout_ref.rollout.multi_turn.rollback_is_threshold=0.9 \
+    # actor_rollout_ref.rollout.agent.num_workers=1 \
     # trainer.resume_mode=resume_path \
     # trainer.resume_from_path=$resume_dir \
     # +algorithm.use_dpo_on_tool_calls=true \
