@@ -17,7 +17,6 @@ SandboxFusion/.venv/
 .amltconfig
 .dockerignore
 output.txt
-pyproject.toml
 *.yml
 uv.lock
 upload_model.py
