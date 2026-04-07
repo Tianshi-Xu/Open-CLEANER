@@ -21,3 +21,7 @@ pyproject.toml
 *.yml
 uv.lock
 upload_model.py
+*.gz
+*.run
+/models/
+/gpustat*
