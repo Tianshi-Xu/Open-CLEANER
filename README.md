@@ -129,6 +129,18 @@ After downloading the datasets and SFT checkpoints, follow the steps below to st
   - `actor_rollout_ref.actor.fsdp_config.dtype` and `actor_rollout_ref.rollout.dtype`: we recommend setting both to `float16` to reduce train/infer mismatch.
   - `+algorithm.rollout_correction.rollout_is`: enables IS correction for train/infer mismatch. CLEANER should disable this; otherwise it introduces logits recomputation for overwritten segments. Baselines can enable it, though we found limited gains.
   - `save_negative_samples`, `use_dpo_on_tool_calls`, `dpo_beta`, and `dpo_max_adjustment_ratio`: parameters for negative-sample DPO (a failed attempt; see the appendix). Keep them disabled by default.
+### 4. RL Training with DAPO-baseline
+For training baselines like **DAPO-baseline**, you can directly use the scripts:
+
+* `recipe/cleaner/qwen3_4b.sh`
+* `recipe/cleaner/qwen2_7b.sh`
+
+These correspond to the DAPO-baseline configurations.
+
+If you want to train **DemyAgent-4B**, you can start from the same scripts and simply:
+
+* reduce the learning rate to **1e-6**
+* increase the number of training epochs by **3×**
 
 ## Evaluation
 | Model | Link |
