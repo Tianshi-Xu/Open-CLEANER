@@ -20,7 +20,8 @@
 <p align="center">
   <img src="intro.png" alt="CLEANER intro" width="95%" />
 </p>
-🔥 **Our new work Life-Harness is open-sourced:** https://github.com/Tianshi-Xu/Life-Harness. **Training free, Evolving Harness with performance improvement up to 1468% !**
+
+🔥 **Our new work Life-Harness is open-sourced**: https://github.com/Tianshi-Xu/Life-Harness. **Training free, Evolving Harness with performance improvement up to 1468% !**
 ## Introduction
 
 - **We propose CLEANER**, which resolves the credit assignment dilemma in agentic RL by training on **self-purified trajectories**. This enables models to internalize correct reasoning patterns while filtering out execution noise.
